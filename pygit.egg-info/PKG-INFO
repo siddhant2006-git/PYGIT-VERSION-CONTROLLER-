@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: pygit
+Version: 0.1.0
+Summary: A Git clone written in Python
+Requires-Python: >=3.9
