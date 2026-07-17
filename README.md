@@ -1,3 +1,11 @@
+##### sha1 and sha256 use .
+
+i cannot use for sha1 because it can break the security bacause 
+file 1 can make the sha1- adfghjk1233
+file2- can make the sha1 has same -xcvbnm1234
+then it will collision to them.
+
+
 # PyGit - Command Explanation
 
 This project is a small Python version of Git. It helps you understand how Git-like commands work internally.

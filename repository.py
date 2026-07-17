@@ -14,6 +14,10 @@ from models import (
 
 class repository:
 
+
+# resolve - to convert current to absolute path .
+# cwd - current working directory .
+
     def __init__(self, path: str):
         # Store the repository root path and make it absolute
         self.path = Path(path).resolve() if path else Path.cwd().resolve()
@@ -33,6 +37,12 @@ class repository:
         self.ref_dir.mkdir(exist_ok=True)
         self.heads_dir.mkdir(exist_ok=True)
 
+        # unencode error -occur when you write the file if it cannot represent the character .
+        # reason - it can support only 128 characters (English letters, digits, symbols)it cannot store it .
+
+        # unidecode error - occur to read the file byte can change with ascii code fail to them for utf-8bytes .
+        # utf-8-it is convert to character  to the bytes .
+
         # Set the default branch to main
         self.head_file.write_text("ref: refs/heads/main\n", encoding="utf-8")
         self._write_ref("main", "")
@@ -42,6 +52,7 @@ class repository:
         print(f"Initialized empty pygit repository in {self.git_dir}")
         return True
 
+# it can load the index from bytes data
     def load_index(self) -> dict[str, str]:
         # Read the staging area data from the index file
         if not self.index_file.exists():
@@ -56,9 +67,12 @@ class repository:
     # dumps - return the json string (python object to convert json string )
     # dump - write the json string in file .
     # save function - it is used to save the index for the staging file .
+
+    # working save index - index can be in string key and string value format . it can save data convert into json formate .
+    # Write the staging area information back to the index file.
     def save_index(self, index: dict[str, str]):
-        # Write the staging area information back to the index file
         self.index_file.write_text(json.dumps(index, indent=2), encoding="utf-8")
+        
 
     # hash libary - it can use generate the hash digits .
     def store_object(self, obj: Gitobject) -> str:

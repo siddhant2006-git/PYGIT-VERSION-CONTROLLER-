@@ -8,17 +8,17 @@ class Gitobject:
     "blob, tree, and commit."
 
     def __init__(self, obj_type: str, content: bytes):
-      # init constructor which are store the data formation
+        # init constructor which are store the data formation
         self.type = obj_type
         self.content = content
 
     def hash(self) -> str:
-      # encode -convert text into specfic  formate .
+        # encode -convert text into bytes specfic  formate .
         header = f"{self.type} {len(self.content)}\0".encode()
-        return hashlib.sha1(header + self.content).hexdigest()
+        return hashlib.sha256(header + self.content).hexdigest()
 
-# self.type -A string indicate like blob, tree , commit .
-# len(self.content)- it is used to count the number of bytes in the content .
+    # self.type -A string indicate like blob, tree , commit .
+    # len(self.content)- it is used to count the number of bytes in the content .
     def serialize(self) -> bytes:
         # compress the big data convert into small data .
         header = f"{self.type} {len(self.content)}\0".encode()
@@ -27,7 +27,7 @@ class Gitobject:
     @classmethod
     def deserialize(cls, data: bytes) -> "Gitobject":
         # Read compressed data and convert it back into an object
-        # decompress - small data convert into orginal data 
+        # decompress - small data convert into orginal data
         # decode - bytes convert into string .
         # cls - call the constructor from the gitobject .
         # decode - it is used to convert bytes to string change .
@@ -45,6 +45,7 @@ class Blob(Gitobject):
     def __init__(self, content: bytes):
         # super-to access the property of parent .
         super().__init__("blob", content)
+
 
 # tree - inheritace can use to access to parent from to child.
 class Tree(Gitobject):
