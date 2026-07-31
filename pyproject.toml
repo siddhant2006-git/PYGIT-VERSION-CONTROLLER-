@@ -6,10 +6,22 @@ build-backend = "setuptools.build_meta"
 name = "pygit"
 version = "0.1.0"
 description = "A Git clone written in Python"
+readme = "README.md"
+authors = [{ name = "PyGit Developers" }]
 requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+]
 
 [project.scripts]
 pygit = "cli:main"
 
 [tool.setuptools]
-py-modules = ["cli", "main", "models", "repository"]
+py-modules = ["cli", "exceptions", "main", "models", "repository"]
