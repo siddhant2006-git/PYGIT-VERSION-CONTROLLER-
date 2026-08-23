@@ -1,4 +1,0 @@
-cli
-main
-models
-repository
