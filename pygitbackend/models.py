@@ -56,6 +56,7 @@ class Tree(Gitobject):
 
     def add_entries(self, name: str, mode: str, obj_hash: str):
         self.entries.append((name, mode, obj_hash))
+        self.content = self._serialize_entries()
 
     @classmethod
     def from_content(cls, content: bytes) -> Tree:

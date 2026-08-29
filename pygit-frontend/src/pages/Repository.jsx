@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useRepository } from '../hooks/useRepository';
 import RepositoryHeader from '../components/RepositoryHeader';
@@ -6,21 +6,24 @@ import RepoStats from '../components/RepoStats';
 import FileExplorer from '../components/FileExplorer';
 import ReadmeViewer from '../components/ReadmeViewer';
 import CommitModal from '../components/CommitModal';
-import { getFileContent, push } from '../services/api';
-import { RefreshCw, AlertCircle, FileCode, X, CheckCircle2 } from 'lucide-react';
+import { getFileContent, getRepositoryFiles, createRepository } from '../services/api';
+import { RefreshCw, AlertCircle, FileCode, X } from 'lucide-react';
 
 export default function Repository() {
   const { repo: repoName } = useParams();
   const { repo, branches, currentBranch, files, readme, loading, error, switchBranch, refetch } = useRepository(repoName);
-  
+
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
-  const [pushing, setPushing] = useState(false);
-  const [pushResult, setPushResult] = useState(null);
-  
+
   // Inline File Blob Viewer state
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileContent, setFileContent] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
+
+  // Directory browsing state (File Explorer navigation)
+  const [currentPath, setCurrentPath] = useState('');
+  const [dirFiles, setDirFiles] = useState(null);
+  const [loadingDir, setLoadingDir] = useState(false);
 
   const handleSelectFile = async (file) => {
     setSelectedFile(file);
@@ -35,19 +38,34 @@ export default function Repository() {
     }
   };
 
-  const handlePush = async () => {
-    setPushing(true);
-    setPushResult(null);
+  const handleSelectDirectory = async (path) => {
+    setLoadingDir(true);
     try {
-      const res = await push(repoName, 'origin', currentBranch);
-      setPushResult(res);
-      setTimeout(() => setPushResult(null), 5000);
+      const data = await getRepositoryFiles(repoName, currentBranch, path);
+      setDirFiles(data);
+      setCurrentPath(path);
     } catch (err) {
-      setPushResult({ success: false, error: err.message });
+      console.error('Failed to load directory:', path, err);
     } finally {
-      setPushing(false);
+      setLoadingDir(false);
     }
   };
+
+  const handleNavigateUp = async () => {
+    const parentPath = currentPath.split('/').slice(0, -1).join('/');
+    if (!parentPath) {
+      setDirFiles(null);
+      setCurrentPath('');
+      return;
+    }
+    await handleSelectDirectory(parentPath);
+  };
+
+  // Reset directory browsing whenever the branch changes
+  useEffect(() => {
+    setDirFiles(null);
+    setCurrentPath('');
+  }, [currentBranch]);
 
   if (loading) {
     return (
@@ -99,28 +117,9 @@ export default function Repository() {
         currentBranch={currentBranch}
         onSelectBranch={switchBranch}
         onOpenCommitModal={() => setIsCommitModalOpen(true)}
-        onPush={handlePush}
-        pushing={pushing}
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Push Notification Banner */}
-        {pushResult && (
-          <div className={`mb-6 p-4 rounded-xl border flex items-center justify-between text-xs font-mono transition-all ${
-            pushResult.success !== false
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-              : 'bg-red-500/10 border-red-500/30 text-red-300'
-          }`}>
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>{pushResult.output || `Push successful: ${currentBranch} → origin/${currentBranch}`}</span>
-            </div>
-            <button onClick={() => setPushResult(null)} className="p-1 text-slate-400 hover:text-white">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
         <RepoStats repo={repo} branchCount={branches.length} fileCount={files.length} />
 
         {/* Selected File Blob Code Viewer */}
@@ -150,10 +149,22 @@ export default function Repository() {
         )}
 
         {/* File Explorer Table */}
+        {currentPath && (
+          <div className="mb-2 flex items-center space-x-2 text-xs text-slate-400">
+            <button
+              onClick={handleNavigateUp}
+              className="text-blue-400 hover:underline font-mono"
+            >
+              ..
+            </button>
+            <span className="font-mono">/ {currentPath}</span>
+          </div>
+        )}
         <FileExplorer
-          files={files}
+          files={loadingDir ? [] : (dirFiles !== null ? dirFiles : files)}
           onSelectFile={handleSelectFile}
-          currentPath=""
+          onSelectDirectory={handleSelectDirectory}
+          currentPath={currentPath}
         />
 
         {/* README Renderer */}

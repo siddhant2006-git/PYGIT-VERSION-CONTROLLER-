@@ -7,7 +7,8 @@ import { BookOpen, Plus, Search, GitBranch, Terminal, RefreshCw, AlertCircle } f
 
 export default function Dashboard() {
   const { searchQuery, setSearchQuery } = useOutletContext();
-  const { repositories, allCount, loading, error, refetch } = useRepositories();
+  const { repositories, loading, error, refetch } = useRepositories();
+  const allCount = repositories.length;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const navigate = useNavigate();
 

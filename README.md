@@ -1,274 +1,176 @@
-# 🐍 PyGit — A Lightweight Git Clone in Python
+# PyGit
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#)
-
-**PyGit** is a lightweight, educational implementation of the [Git](https://git-scm.com/) version control system, built entirely with Python's standard library — **zero external runtime dependencies**.
-
-It supports core version-control workflows: initializing repositories, staging files, committing changes, branching, merging, rebasing, and pushing to remotes.
-
----
-
-## 📂 Folder Structure
+A lightweight Git version-control system implemented from scratch in Python, exposed over a REST API, and driven by a React web UI. The project has three layers: a dependency-free core engine, a FastAPI backend that wraps it, and a Vite/React frontend that consumes the API.
 
 ```
-pygit/
-│
-├── main.py              # 🚀 Entry point — runs cli.main()
-├── cli.py               # 🖥️  CLI parser (argparse) & subcommand handlers
-├── repository.py        # 🏗️  Core repository engine (Repository class)
-├── models.py            # 📦 Git object models (Blob, Tree, Gitobject)
-├── exceptions.py        # ⚠️  Custom exception hierarchy
-├── __init__.py           # 📋 Package exports & version
-├── pyproject.toml        # ⚙️  Build config, dependencies & scripts
-│
-├── tests/               # 🧪 Test suite
-│   ├── __init__.py
-│   ├── test_repository.py        # Repository operation tests
-│   └── test_branch_workflow.py   # Branch workflow tests
-│
-└── .pygit/              # 📁 PyGit metadata (created after `pygit init`)
-    ├── HEAD             # Current branch reference
-    ├── index            # Staging area (JSON format)
-    ├── config           # Remote configuration (JSON)
-    ├── objects/         # Object store (zlib-compressed, SHA-256 keyed)
-    │   └── <2-char>/    # Sharded by first 2 hex chars of hash
-    │       └── <rest>   # Remaining hash chars as filename
-    └── refs/
-        └── heads/       # Branch references
-            ├── main
-            └── ...
+gitclone/
+├── pygitbackend/        # Python core engine + FastAPI server (backend)
+├── pygit-frontend/       # React + Vite single-page app (frontend)
+├── repos/                 # Repositories managed through the web UI
+└── .env.example           # Shared config template (host/port/API base URL)
 ```
 
 ---
 
-## ✨ Features
+## Architecture Overview
 
-| Feature | Command | Description |
-|---------|---------|-------------|
-| **Initialize** | `pygit init` | Create a new `.pygit` repository |
-| **Stage files** | `pygit add <path>` | Stage files or directories |
-| **Commit** | `pygit commit -m "msg"` | Save staged changes with a message |
-| **Status** | `pygit status` | View branch, staged & untracked files |
-| **Branch** | `pygit branch <name>` | Create and switch to a new branch |
-| **List branches** | `pygit branch` | Show all local branches |
-| **Checkout** | `pygit checkout <branch>` | Switch to an existing branch |
-| **Create & switch** | `pygit checkout -b <branch>` | Create a new branch and switch to it |
-| **Delete branch** | `pygit branch -d <name>` | Delete a local branch |
-| **Rename branch** | `pygit branch -m <new>` | Rename the current branch |
-| **Merge** | `pygit merge <branch>` | Fast-forward merge a branch |
-| **Rebase** | `pygit rebase <branch>` | Rebase current branch onto another |
-| **Remote** | `pygit remote add <name> <url>` | Add or update a remote |
-| **Push** | `pygit push <remote> <branch>` | Push a branch to a remote |
-| **Push (upstream)** | `pygit push -u <remote>` | Push and set upstream tracking |
-| **Delete remote branch** | `pygit push <remote> --delete <branch>` | Delete a branch on remote |
+```
+┌─────────────────────┐        HTTP/JSON        ┌──────────────────────┐        reads/writes        ┌────────────────────┐
+│  pygit-frontend      │  ───────────────────▶  │  pygitbackend/server │  ─────────────────────────▶ │  pygitbackend/      │
+│  (React + Vite SPA)  │  ◀───────────────────  │  (FastAPI REST API)  │  ◀───────────────────────── │  repository.py core │
+└─────────────────────┘        axios client      └──────────────────────┘        Python calls        └────────────────────┘
+                                                                                              │
+                                                                                              ▼
+                                                                                    .pygit/ object store
+                                                                                    (blobs, trees, commits,
+                                                                                     refs, index — on disk
+                                                                                     per repository)
+```
+
+- The **frontend** never touches the filesystem or git internals directly — it only talks to the backend over HTTP.
+- The **backend** is a thin REST wrapper: each endpoint resolves a `Repository` instance and delegates to the core engine.
+- The **core engine** (`repository.py`, `models.py`) implements Git's object model (blobs/trees/commits), staging index, branches, and remotes independently of any web framework, so it can also be driven from the `cli.py` command-line tool.
 
 ---
 
-## 🚀 Getting Started
+## Backend (`pygitbackend/`)
 
-### Prerequisites
+**Stack:** Python 3.9+, FastAPI, Uvicorn, Pydantic. Zero external dependencies in the core engine itself.
 
-- **Python 3.9** or higher
+| File | Responsibility |
+|---|---|
+| `repository.py` | Core `Repository` class — init, staging (`add`), commit, branch create/checkout/delete/rename, merge/rebase, tree building, log/status, remote add/push. |
+| `models.py` | Storage primitives: `Gitobject`, `Blob`, `Tree` — zlib compression + SHA-256 content addressing. |
+| `exceptions.py` | Domain error hierarchy: `PyGitError`, `RepositoryError`, `CommandError`, `FileError`, `BranchError`, `RemoteError`. |
+| `cli.py` | `argparse`-based CLI (`pygit init`, `pygit commit`, ...) built directly on top of `repository.py`. |
+| `server.py` | FastAPI app — translates HTTP requests into `Repository` calls and JSON responses. |
+| `main.py` | Entry point for the CLI (`cli.main()`). |
+| `.pygit/`, `repos/*/.pygit/` | On-disk object store per repository (objects, refs, index, HEAD). |
 
-### Installation
+### On-disk storage model
+
+- Metadata lives in `.pygit/` (not `.git/`).
+- Object keys are **SHA-256** hashes (not SHA-1).
+- The staging index is JSON at `.pygit/index`.
+- State files (`HEAD`, branch refs, index) are written atomically via temp-file-then-replace to avoid corruption.
+- Paths are validated against traversal (`validate_path`) and branch names are validated (`validate_branch_name`).
+
+### REST API (`server.py`)
+
+All routes are mounted under `/api` and every repository operation is delegated to a `Repository(str(repo_path))` instance resolved by name.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/repositories` | List repositories |
+| POST | `/api/repositories` | Create a repository |
+| GET | `/api/repositories/{repo_name}` | Repository summary |
+| GET | `/api/repositories/{repo_name}/files` | Browse files at a path/branch |
+| GET | `/api/repositories/{repo_name}/readme` | Fetch rendered README |
+| GET | `/api/repositories/{repo_name}/blob/{branch}/{file_path}` | Fetch file contents |
+| GET | `/api/repositories/{repo_name}/commits` | Commit log for a branch |
+| GET | `/api/repositories/{repo_name}/branches` | List branches |
+| POST | `/api/repositories/{repo_name}/branches` | Create branch |
+| POST | `/api/repositories/{repo_name}/checkout` | Switch branch |
+| DELETE | `/api/repositories/{repo_name}/branches/{branch_name}` | Delete branch |
+| POST | `/api/repositories/{repo_name}/branches/rename` | Rename branch |
+| GET | `/api/repositories/{repo_name}/status` | Staged/untracked file status |
+| POST | `/api/repositories/{repo_name}/add` | Stage files |
+| POST | `/api/repositories/{repo_name}/commit` | Create a commit |
+| GET | `/api/repositories/{repo_name}/remotes` | List remotes |
+| POST | `/api/repositories/{repo_name}/remotes` | Add a remote |
+| POST | `/api/repositories/{repo_name}/push` | Push to a remote |
+
+CORS is open (`allow_origins=["*"]`) for local development against the Vite dev server.
+
+### Running the backend
 
 ```bash
-# Clone the repository
-git clone https://github.com/siddhant2006/PYGIT-VERSION-CONTROLLER-.git
-cd PYGIT-VERSION-CONTROLLER-
-
-# (Optional) Create a virtual environment
-python -m venv venv
-source venv/bin/activate        # Linux/macOS
-venv\Scripts\activate           # Windows
-
-# Install in editable mode
-pip install -e .
-
-# Or install with dev dependencies (pytest, black, mypy, ruff)
-pip install -e ".[dev]"
+cd pygitbackend
+pip install -r requirements.txt
+uvicorn server:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Quick Start & Full Stack Setup
+### Running the CLI directly (no server)
 
-#### 1. Start the FastAPI Backend Server
 ```bash
-# Launches HTTP REST API on http://localhost:8000
-python server.py
-# or: py -m uvicorn server:app --reload --port 8000
+cd pygitbackend
+python main.py --help
+# or, if installed via pyproject.toml in editable mode:
+pygit --help
 ```
 
-#### 2. Start the React Frontend UI
+---
+
+## Frontend (`pygit-frontend/`)
+
+**Stack:** React 18, React Router 6, Vite 5, Tailwind CSS, Axios, lucide-react icons.
+
+```
+src/
+├── main.jsx                 # App bootstrap
+├── App.jsx                  # Router setup
+├── layouts/MainLayout.jsx   # Shell layout (nav + outlet)
+├── pages/                   # Route-level views
+│   ├── Dashboard.jsx          # Repository list
+│   ├── CreateRepository.jsx   # New repository form
+│   ├── Repository.jsx         # Repo overview (files/README)
+│   ├── Commits.jsx             # Commit history
+│   ├── Branches.jsx            # Branch management
+│   └── Settings.jsx            # Remotes/push config
+├── components/               # Reusable UI (FileExplorer, FileTree, CommitList,
+│                              #  CommitCard, CommitModal, BranchSelector,
+│                              #  RepositoryCard/Header, RepoStats, Navbar,
+│                              #  ReadmeViewer, CreateRepositoryModal, CommitButton)
+├── hooks/                    # useRepositories, useRepository, useCommits
+├── services/api.js           # Axios client — one function per backend endpoint
+└── utils/formatters.js       # Display formatting helpers
+```
+
+### Data flow
+
+- `services/api.js` wraps every backend endpoint in a typed function (`getRepositories`, `createRepository`, `getCommits`, `commit`, `push`, ...).
+- Each API call **falls back to in-memory mock data** if the backend request fails, so the UI stays usable offline/in preview.
+- `hooks/` fetch and cache data per page (repositories list, a single repository, its commits) and expose loading/error state to `pages/`.
+- `pages/` compose `components/` and pass data down as props; components stay presentational.
+
+### Running the frontend
+
 ```bash
 cd pygit-frontend
-npm run dev
-# Launches Vite frontend on http://localhost:3000
+npm install
+npm run dev       # Vite dev server, proxies /api to the backend
+npm run build      # production build → dist/
 ```
 
-# Stage files
-pygit add myfile.txt
-pygit add src/                   # Stage an entire directory
+### Configuration
 
-# Commit changes
-pygit commit -m "Initial commit"
+Copy `.env.example` to `.env` at the repo root:
 
-# Check repository status
-pygit status
+```
+HOST=0.0.0.0
+PORT=8000
+REPOS_DIR=repos
 
-# Create and switch to a new branch
-pygit checkout -b feature
-
-# Make changes, stage, and commit
-pygit add updated_file.py
-pygit commit -m "Add feature"
-
-# Switch back to main and merge
-pygit checkout main
-pygit merge feature
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ---
 
-## 🏗️ Architecture
+## Implementing a New Feature (both layers)
 
-### Module Breakdown
-
-| Module | Role |
-|--------|------|
-| [`main.py`](main.py) | Entry point — calls `cli.main()` |
-| [`cli.py`](cli.py) | Parses arguments with `argparse`, routes to handler functions. Uses `@require_repository` decorator to enforce valid repo context. |
-| [`repository.py`](repository.py) | The **Repository** class — the core engine. Manages `.pygit/` storage, index (staging), tree building, commit history, branching, merge/rebase, and remote sync. |
-| [`models.py`](models.py) | Data models for Git objects: **Gitobject** (base), **Blob** (files), **Tree** (directories). Handles zlib compression and SHA-256 hashing. |
-| [`exceptions.py`](exceptions.py) | Domain-specific exception hierarchy rooted at `PyGitError`. |
-
-### How It Works — Internal Flow
-
-```
-                ┌──────────────────────────────────┐
-                │         User runs CLI            │
-                │     python main.py <command>     │
-                └──────────────┬───────────────────┘
-                               │
-                               ▼
-                ┌──────────────────────────────────┐
-                │         cli.py                   │
-                │   argparse → handler function    │
-                │   @require_repository check      │
-                └──────────────┬───────────────────┘
-                               │
-                               ▼
-                ┌──────────────────────────────────┐
-                │       repository.py              │
-                │   Repository class methods       │
-                │   ┌────────────────────────────┐ │
-                │   │ • init()    → .pygit dirs  │ │
-                │   │ • add()    → stage to JSON │ │
-                │   │ • commit() → tree + commit │ │
-                │   │ • branch() → refs/heads    │ │
-                │   │ • merge()  → fast-forward  │ │
-                │   │ • rebase() → replay commits│ │
-                │   └────────────────────────────┘ │
-                └──────────────┬───────────────────┘
-                               │
-                               ▼
-                ┌──────────────────────────────────┐
-                │         models.py                │
-                │   Gitobject / Blob / Tree        │
-                │   ┌────────────────────────────┐ │
-                │   │ • SHA-256 hashing          │ │
-                │   │ • zlib compression         │ │
-                │   │ • serialize / deserialize  │ │
-                │   └────────────────────────────┘ │
-                └──────────────┬───────────────────┘
-                               │
-                               ▼
-                ┌──────────────────────────────────┐
-                │       .pygit/ (on disk)          │
-                │   objects/ refs/ HEAD index      │
-                └──────────────────────────────────┘
-```
-
-### Key Design Decisions
-
-| Aspect | Git | PyGit |
-|--------|-----|-------|
-| Metadata directory | `.git/` | `.pygit/` |
-| Hash algorithm | SHA-1 (160-bit) | **SHA-256** (256-bit) |
-| Object storage | zlib-compressed, hash-sharded | Same ✅ |
-| Index/staging format | Binary | **JSON** (human-readable) |
-| Write safety | Lock files | **Atomic `.tmp` → rename** |
-| Path security | Built-in | `validate_path()` traversal guard |
-| Branch naming | Complex rules | `validate_branch_name()` strict check |
+1. **Core**: add the operation to `Repository` in `pygitbackend/repository.py` (and a matching CLI subcommand in `cli.py` if useful standalone).
+2. **API**: expose it as a route in `pygitbackend/server.py`, validating input with a Pydantic model.
+3. **Client**: add a corresponding function in `pygit-frontend/src/services/api.js`, including a mock-data fallback.
+4. **UI**: consume it via a hook in `src/hooks/` and surface it in the relevant `pages/`/`components/`.
+5. **Tests**: cover core logic in `pygitbackend/tests/`.
 
 ---
 
-## 🧪 Running Tests
+## Testing
 
 ```bash
-# Using unittest
+cd pygitbackend
 py -m unittest discover -s tests
-
-# Using pytest (requires dev install)
+# or
 pytest
-
-# With coverage report
-pytest --cov=. --cov-report=term-missing
 ```
-
----
-
-## 📖 Exception Hierarchy
-
-PyGit uses domain-specific exceptions for clean error handling:
-
-```
-PyGitError                  # Base exception
-├── RepositoryError         # Missing .pygit, corrupt objects
-├── CommandError            # Invalid command usage
-├── FileError               # Missing files, permission issues
-├── BranchError             # Invalid branch operations
-└── RemoteError             # Remote configuration problems
-```
-
----
-
-## 🛠️ Development
-
-### Code Style
-
-- **Python 3.9+** with `from __future__ import annotations`
-- **PEP 8** formatting (Black + Ruff compatible)
-- Full **type annotations** on all functions
-- Domain exceptions from `exceptions.py` (never bare `Exception`)
-
-### Adding a New Command
-
-1. Add a subparser in [`cli.py` → `build_parser()`](cli.py)
-2. Create a handler function decorated with `@require_repository`
-3. Add the dispatch case in `main()`
-4. Implement the logic in [`repository.py` → `Repository`](repository.py)
-5. Write tests in `tests/`
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`pygit checkout -b my-feature`)
-3. Commit your changes (`pygit commit -m "Add awesome feature"`)
-4. Push to the branch (`pygit push origin my-feature`)
-5. Open a Pull Request
-
----
-
-## 📝 License
-
-This project is open source and available under the [MIT License](LICENSE).
-
----
-
-<p align="center">
-  Built with ❤️ in Python — <b>zero dependencies, pure learning</b>
-</p>

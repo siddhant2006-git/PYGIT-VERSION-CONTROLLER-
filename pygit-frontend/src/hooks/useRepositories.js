@@ -5,7 +5,6 @@ export function useRepositories() {
   const [repositories, setRepositories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchRepositories = useCallback(async () => {
     setLoading(true);
@@ -24,18 +23,10 @@ export function useRepositories() {
     fetchRepositories();
   }, [fetchRepositories]);
 
-  const filteredRepositories = repositories.filter(repo =>
-    repo.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (repo.description && repo.description.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
-
   return {
-    repositories: filteredRepositories,
-    allCount: repositories.length,
+    repositories,
     loading,
     error,
-    searchQuery,
-    setSearchQuery,
     refetch: fetchRepositories
   };
 }

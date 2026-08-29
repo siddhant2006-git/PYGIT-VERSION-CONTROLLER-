@@ -1,6 +1,15 @@
 import axios from 'axios';
 
-const API_BASE = '/api';
+// Respect VITE_API_BASE_URL (see .env.example) so a production build talks to the
+// right backend origin instead of relying solely on the dev-server proxy.
+const API_BASE = import.meta.env.VITE_API_BASE_URL
+  ? `${import.meta.env.VITE_API_BASE_URL}/api`
+  : '/api';
+
+// Mock/offline preview mode must be explicitly opted into (VITE_USE_MOCKS=true).
+// When it's off (the default), a failed request rejects like a normal API call
+// so the UI's real error states (retry buttons, error banners) actually fire.
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 const client = axios.create({
   baseURL: API_BASE,
@@ -9,6 +18,29 @@ const client = axios.create({
   },
   timeout: 5000,
 });
+
+async function request(makeRequest, makeMock, label) {
+  try {
+    const res = await makeRequest();
+    return res.data;
+  } catch (err) {
+    if (USE_MOCKS) {
+      console.warn(`API offline, using mock data for ${label}:`, err.message);
+      return makeMock(err);
+    }
+    // Axios's err.message is a generic "Request failed with status code 400" —
+    // the actual explanation FastAPI sends lives at err.response.data.detail.
+    // Surface it here once so every caller's err.message is the real reason.
+    const detail = err.response?.data?.detail;
+    if (detail) {
+      const wrapped = new Error(detail);
+      wrapped.status = err.response.status;
+      wrapped.original = err;
+      throw wrapped;
+    }
+    throw err;
+  }
+}
 
 // Mock initial state for offline preview mode
 let mockRepositories = [
@@ -135,82 +167,82 @@ let mockRemotes = {
 
 /**
  * API Service functions
+ *
+ * Every function talks to the real backend first. Mock fallbacks below only
+ * run when VITE_USE_MOCKS=true (offline preview mode) — otherwise a failed
+ * request rejects normally so callers' error handling actually runs.
  */
 export const getRepositories = async () => {
-  try {
-    const res = await client.get('/repositories');
-    return res.data;
-  } catch (err) {
-    console.warn('API offline, using mock data for getRepositories:', err.message);
-    return mockRepositories;
-  }
+  return request(
+    () => client.get('/repositories'),
+    () => mockRepositories,
+    'getRepositories'
+  );
 };
 
 export const createRepository = async (data) => {
-  try {
-    const res = await client.post('/repositories', data);
-    return res.data;
-  } catch (err) {
-    console.warn('API offline, adding to mock repositories:', err.message);
-    const newRepo = {
-      name: data.name,
-      description: data.description || '',
-      default_branch: data.initial_branch || 'main',
-      current_branch: data.initial_branch || 'main',
-      commit_count: data.initialize_readme ? 1 : 0,
-      branch_count: 1,
-      file_count: data.initialize_readme ? 1 : 0,
-      last_updated: Math.floor(Date.now() / 1000),
-      visibility: data.visibility || 'public',
-      has_readme: !!data.initialize_readme,
-    };
-    mockRepositories.unshift(newRepo);
-    if (data.initialize_readme) {
-      mockCommits[data.name] = [{
-        hash: 'init1234567890123456789abcdef0123456789abcdef0123456789abcdef0',
-        message: 'Initial commit with README.md',
-        author: 'Siddhant <siddhant@pygit.com>',
-        date: Math.floor(Date.now() / 1000),
-        parents: [],
-        files_changed: ['README.md']
-      }];
-      mockFiles[data.name] = [
-        { name: 'README.md', type: 'file', size: 120, path: 'README.md' }
-      ];
-    }
-    return newRepo;
-  }
+  return request(
+    () => client.post('/repositories', data),
+    () => {
+      const newRepo = {
+        name: data.name,
+        description: data.description || '',
+        default_branch: data.initial_branch || 'main',
+        current_branch: data.initial_branch || 'main',
+        commit_count: data.initialize_readme ? 1 : 0,
+        branch_count: 1,
+        file_count: data.initialize_readme ? 1 : 0,
+        last_updated: Math.floor(Date.now() / 1000),
+        visibility: data.visibility || 'public',
+        has_readme: !!data.initialize_readme,
+      };
+      mockRepositories.unshift(newRepo);
+      if (data.initialize_readme) {
+        mockCommits[data.name] = [{
+          hash: 'init1234567890123456789abcdef0123456789abcdef0123456789abcdef0',
+          message: 'Initial commit with README.md',
+          author: 'Siddhant <siddhant@pygit.com>',
+          date: Math.floor(Date.now() / 1000),
+          parents: [],
+          files_changed: ['README.md']
+        }];
+        mockFiles[data.name] = [
+          { name: 'README.md', type: 'file', size: 120, path: 'README.md' }
+        ];
+      }
+      return newRepo;
+    },
+    'createRepository'
+  );
 };
 
 export const getRepository = async (name) => {
-  try {
-    const res = await client.get(`/repositories/${name}`);
-    return res.data;
-  } catch (err) {
-    const repo = mockRepositories.find(r => r.name === name);
-    if (!repo) throw new Error(`Repository ${name} not found`);
-    return repo;
-  }
+  return request(
+    () => client.get(`/repositories/${name}`),
+    () => {
+      const repo = mockRepositories.find(r => r.name === name);
+      if (!repo) throw new Error(`Repository ${name} not found`);
+      return repo;
+    },
+    'getRepository'
+  );
 };
 
 export const getRepositoryFiles = async (name, branch = 'main', path = '') => {
-  try {
-    const res = await client.get(`/repositories/${name}/files`, { params: { branch, path } });
-    return res.data;
-  } catch (err) {
-    return mockFiles[name] || [
+  return request(
+    () => client.get(`/repositories/${name}/files`, { params: { branch, path } }),
+    () => mockFiles[name] || [
       { name: 'README.md', type: 'file', size: 250, path: 'README.md' },
       { name: 'main.py', type: 'file', size: 166, path: 'main.py' }
-    ];
-  }
+    ],
+    'getRepositoryFiles'
+  );
 };
 
 export const getFileContent = async (name, branch = 'main', path = '') => {
-  try {
-    const res = await client.get(`/repositories/${name}/blob/${branch}/${path}`);
-    return res.data;
-  } catch (err) {
-    return {
+  return request(
+    () => client.get(`/repositories/${name}/blob/${branch}/${path}`),
+    () => ({
       name: path,
       path: path,
       branch: branch,
@@ -220,156 +252,158 @@ export const getFileContent = async (name, branch = 'main', path = '') => {
         sha: 'a1b2c3d',
         date: Math.floor(Date.now() / 1000) - 3600
       }
-    };
-  }
+    }),
+    'getFileContent'
+  );
 };
 
 export const getReadme = async (name, branch = 'main') => {
-  try {
-    const res = await client.get(`/repositories/${name}/readme`, { params: { branch } });
-    return res.data;
-  } catch (err) {
-    return {
+  return request(
+    () => client.get(`/repositories/${name}/readme`, { params: { branch } }),
+    () => ({
       content: `# ${name}\n\nA Python-based Git version control system clone.\n\n## Features\n- Pure Python standard library implementation\n- SHA-256 object storage & zlib compression\n- Branching, rebasing, and remote push capabilities\n\n\`\`\`bash\npygit init\npygit commit -m "Initial commit"\n\`\`\``
-    };
-  }
+    }),
+    'getReadme'
+  );
 };
 
 export const getCommits = async (name, branch = 'main') => {
-  try {
-    const res = await client.get(`/repositories/${name}/commits`, { params: { branch } });
-    return res.data;
-  } catch (err) {
-    return mockCommits[name] || mockCommits['pygit-core'];
-  }
+  return request(
+    () => client.get(`/repositories/${name}/commits`, { params: { branch } }),
+    () => mockCommits[name] || mockCommits['pygit-core'],
+    'getCommits'
+  );
 };
 
 export const getBranches = async (name) => {
-  try {
-    const res = await client.get(`/repositories/${name}/branches`);
-    return res.data;
-  } catch (err) {
-    return mockBranches[name] || [
-      { name: 'main', commit_count: 1, is_default: true }
-    ];
-  }
+  return request(
+    () => client.get(`/repositories/${name}/branches`),
+    () => mockBranches[name] || [{ name: 'main', commit_count: 1, is_default: true }],
+    'getBranches'
+  );
 };
 
 export const createBranch = async (name, branchName) => {
-  try {
-    const res = await client.post(`/repositories/${name}/branches`, { name: branchName });
-    return res.data;
-  } catch (err) {
-    if (!mockBranches[name]) mockBranches[name] = [];
-    mockBranches[name].push({ name: branchName, commit_count: 0, is_default: false });
-    return { name: branchName, message: `Created branch ${branchName}` };
-  }
+  return request(
+    () => client.post(`/repositories/${name}/branches`, { name: branchName }),
+    () => {
+      if (!mockBranches[name]) mockBranches[name] = [];
+      mockBranches[name].push({ name: branchName, commit_count: 0, is_default: false });
+      return { name: branchName, message: `Created branch ${branchName}` };
+    },
+    'createBranch'
+  );
 };
 
 export const checkoutBranch = async (name, branchName) => {
-  try {
-    const res = await client.post(`/repositories/${name}/checkout`, { branch: branchName });
-    return res.data;
-  } catch (err) {
-    const repo = mockRepositories.find(r => r.name === name);
-    if (repo) repo.current_branch = branchName;
-    return { current_branch: branchName, message: `Switched to branch ${branchName}` };
-  }
+  return request(
+    () => client.post(`/repositories/${name}/checkout`, { branch: branchName }),
+    () => {
+      const repo = mockRepositories.find(r => r.name === name);
+      if (repo) repo.current_branch = branchName;
+      return { current_branch: branchName, message: `Switched to branch ${branchName}` };
+    },
+    'checkoutBranch'
+  );
 };
 
 export const deleteBranch = async (name, branchName) => {
-  try {
-    const res = await client.delete(`/repositories/${name}/branches/${branchName}`);
-    return res.data;
-  } catch (err) {
-    if (mockBranches[name]) {
-      mockBranches[name] = mockBranches[name].filter(b => b.name !== branchName);
-    }
-    return { message: `Deleted branch ${branchName}` };
-  }
+  return request(
+    () => client.delete(`/repositories/${name}/branches/${branchName}`),
+    () => {
+      if (mockBranches[name]) {
+        mockBranches[name] = mockBranches[name].filter(b => b.name !== branchName);
+      }
+      return { message: `Deleted branch ${branchName}` };
+    },
+    'deleteBranch'
+  );
 };
 
 export const renameBranch = async (name, oldName, newName) => {
-  try {
-    const res = await client.post(`/repositories/${name}/branches/rename`, { old_name: oldName, new_name: newName });
-    return res.data;
-  } catch (err) {
-    if (mockBranches[name]) {
-      const b = mockBranches[name].find(br => br.name === oldName);
-      if (b) b.name = newName;
-    }
-    return { message: `Renamed branch ${oldName} to ${newName}` };
-  }
+  return request(
+    () => client.post(`/repositories/${name}/branches/rename`, { old_name: oldName, new_name: newName }),
+    () => {
+      if (mockBranches[name]) {
+        const b = mockBranches[name].find(br => br.name === oldName);
+        if (b) b.name = newName;
+      }
+      return { message: `Renamed branch ${oldName} to ${newName}` };
+    },
+    'renameBranch'
+  );
 };
 
 export const getStatus = async (name) => {
-  try {
-    const res = await client.get(`/repositories/${name}/status`);
-    return res.data;
-  } catch (err) {
-    return mockStatus[name] || { branch: 'main', staged: [], untracked: ['newfile.py'] };
-  }
+  return request(
+    () => client.get(`/repositories/${name}/status`),
+    () => mockStatus[name] || { branch: 'main', staged: [], untracked: ['newfile.py'] },
+    'getStatus'
+  );
 };
 
 export const addFiles = async (name, files) => {
-  try {
-    const res = await client.post(`/repositories/${name}/add`, { files });
-    return res.data;
-  } catch (err) {
-    return { message: `Added ${files.length} file(s) to staging area` };
-  }
+  return request(
+    () => client.post(`/repositories/${name}/add`, { files }),
+    () => ({ message: `Added ${files.length} file(s) to staging area` }),
+    'addFiles'
+  );
 };
 
 export const commit = async (name, message) => {
-  try {
-    const res = await client.post(`/repositories/${name}/commit`, { message });
-    return res.data;
-  } catch (err) {
-    const newCommit = {
-      hash: Math.random().toString(36).substring(2) + '00000000000000000000000000000000000000000000',
-      message: message,
-      author: 'Siddhant <siddhant@pygit.com>',
-      date: Math.floor(Date.now() / 1000),
-      parents: [],
-      files_changed: ['staged_file.py']
-    };
-    if (!mockCommits[name]) mockCommits[name] = [];
-    mockCommits[name].unshift(newCommit);
-    return newCommit;
-  }
+  return request(
+    () => client.post(`/repositories/${name}/commit`, { message }),
+    () => {
+      const newCommit = {
+        hash: Math.random().toString(36).substring(2) + '00000000000000000000000000000000000000000000',
+        message: message,
+        author: 'Siddhant <siddhant@pygit.com>',
+        date: Math.floor(Date.now() / 1000),
+        parents: [],
+        files_changed: ['staged_file.py']
+      };
+      if (!mockCommits[name]) mockCommits[name] = [];
+      mockCommits[name].unshift(newCommit);
+      return newCommit;
+    },
+    'commit'
+  );
 };
 
 export const getRemotes = async (name) => {
-  try {
-    const res = await client.get(`/repositories/${name}/remotes`);
-    return res.data;
-  } catch (err) {
-    return mockRemotes[name] || [{ name: 'origin', url: 'https://github.com/user/repo.git' }];
-  }
+  return request(
+    () => client.get(`/repositories/${name}/remotes`),
+    () => mockRemotes[name] || [{ name: 'origin', url: 'https://github.com/user/repo.git' }],
+    'getRemotes'
+  );
 };
 
 export const addRemote = async (name, remoteData) => {
-  try {
-    const res = await client.post(`/repositories/${name}/remotes`, remoteData);
-    return res.data;
-  } catch (err) {
-    if (!mockRemotes[name]) mockRemotes[name] = [];
-    mockRemotes[name].push(remoteData);
-    return { message: `Added remote ${remoteData.name}` };
-  }
+  return request(
+    () => client.post(`/repositories/${name}/remotes`, remoteData),
+    () => {
+      if (!mockRemotes[name]) mockRemotes[name] = [];
+      mockRemotes[name].push(remoteData);
+      return { message: `Added remote ${remoteData.name}` };
+    },
+    'addRemote'
+  );
 };
 
 export const push = async (name, remote = 'origin', branch = 'main') => {
-  try {
-    const res = await client.post(`/repositories/${name}/push`, { remote, branch });
-    return res.data;
-  } catch (err) {
-    return {
+  return request(
+    // Push cost scales with repo size (walks + copies every reachable object),
+    // unlike the other calls here — give it its own budget instead of the
+    // global 5s timeout, so a slow-but-succeeding push isn't aborted client-side
+    // while the server keeps copying.
+    () => client.post(`/repositories/${name}/push`, { remote, branch }, { timeout: 120000 }),
+    () => ({
       success: true,
       objects_pushed: 3,
       branch: branch,
       remote: remote,
       output: `3 objects pushed\n${branch} → ${remote}/${branch}`
-    };
-  }
+    }),
+    'push'
+  );
 };

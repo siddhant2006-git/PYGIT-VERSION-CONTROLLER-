@@ -5,34 +5,21 @@ import { useCommits } from '../hooks/useCommits';
 import RepositoryHeader from '../components/RepositoryHeader';
 import CommitList from '../components/CommitList';
 import CommitModal from '../components/CommitModal';
-import { push } from '../services/api';
 import { Search } from 'lucide-react';
 
 export default function Commits() {
   const { repo: repoName } = useParams();
   const { repo, branches, currentBranch, switchBranch, refetch: refetchRepo } = useRepository(repoName);
   const { commits, loading, error, refetch: refetchCommits } = useCommits(repoName, currentBranch);
-  
+
   const [search, setSearch] = useState('');
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
-  const [pushing, setPushing] = useState(false);
 
   const filteredCommits = commits.filter(c =>
     c.message.toLowerCase().includes(search.toLowerCase()) ||
     c.author.toLowerCase().includes(search.toLowerCase()) ||
     c.hash.toLowerCase().includes(search.toLowerCase())
   );
-
-  const handlePush = async () => {
-    setPushing(true);
-    try {
-      await push(repoName, 'origin', currentBranch);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPushing(false);
-    }
-  };
 
   return (
     <div>
@@ -42,8 +29,6 @@ export default function Commits() {
         currentBranch={currentBranch}
         onSelectBranch={switchBranch}
         onOpenCommitModal={() => setIsCommitModalOpen(true)}
-        onPush={handlePush}
-        pushing={pushing}
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

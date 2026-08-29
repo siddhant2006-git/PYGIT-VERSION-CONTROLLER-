@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 try:
     from pygitbackend.exceptions import (
@@ -35,6 +35,7 @@ except ModuleNotFoundError:
 GIT_TIMEZONE_OFFSET = "+0000"
 TREE_MODE = "40000"
 BLOB_MODE = "100644"
+OBJECT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def validate_branch_name(name: str) -> str:
@@ -52,18 +53,48 @@ def validate_branch_name(name: str) -> str:
     return name
 
 
+def validate_repo_name(name: str) -> str:
+    """Validate a repository name to prevent directory traversal and unsafe filesystem names."""
+    if not name or not name.strip():
+        raise RepositoryError("Repository name cannot be empty")
+    if not re.match(r"^[A-Za-z0-9._-]+$", name):
+        raise RepositoryError(
+            f"Invalid repository name '{name}'. Only alphanumeric characters, dots, dashes, and underscores are allowed."
+        )
+    if name in (".", "..") or name.startswith("."):
+        raise RepositoryError(
+            f"Invalid repository name '{name}'. Cannot start with '.' or be '.' / '..'."
+        )
+    return name
+
+
 def validate_path(path: str, base_dir: Path) -> Path:
     """Validate and resolve path to prevent traversal attacks."""
     full_path = (base_dir / path).resolve()
-    if not str(full_path).startswith(str(base_dir.resolve())):
+    try:
+        full_path.relative_to(base_dir.resolve())
+    except ValueError:
         raise FileError(f"Path '{path}' attempts to traverse outside repository")
     return full_path
+
+
+def validate_object_hash(obj_hash: str) -> str:
+    """Validate a SHA-256 object identifier before using it in a path."""
+    if not OBJECT_HASH_RE.fullmatch(obj_hash):
+        raise RepositoryError(f"Invalid object hash '{obj_hash}'")
+    return obj_hash
 
 
 class Repository:
     """Main repository manager handling Git storage and operations."""
 
-    def __init__(self, path: str = ""):
+    def __init__(self, path: str | Path | None = None):
+        if path is Ellipsis:
+            raise RepositoryError(
+                "Repository path cannot be Ellipsis; pass a real filesystem path."
+            )
+        if path is not None and not isinstance(path, (str, Path)):
+            raise RepositoryError("Repository path must be a string or pathlib.Path")
         self.path = Path(path).resolve() if path else Path.cwd().resolve()
         self.git_dir = self.path / ".pygit"
         self.object_dir = self.git_dir / "objects"
@@ -205,6 +236,7 @@ class Repository:
 
     def read_object(self, obj_hash: str) -> Gitobject:
         """Read and verify object integrity from storage."""
+        validate_object_hash(obj_hash)
         object_file = self.object_dir / obj_hash[:2] / obj_hash[2:]
         if not object_file.exists():
             raise RepositoryError(f"Object {obj_hash} not found")
@@ -319,36 +351,44 @@ class Repository:
         print(f"Deleted branch '{name}'")
         return name
 
-    def rename_branch(self, new_name: str, force: bool = False) -> str:
-        """Rename current branch."""
+    def rename_branch(self, new_name: str, old_name: str | None = None, force: bool = False) -> str:
+        """Rename a branch. Renames the current branch if `old_name` is not given."""
         validate_branch_name(new_name)
         current_branch = self.get_current_branch()
-        if not current_branch:
-            raise BranchError("No current branch to rename")
-        if current_branch == new_name:
-            return current_branch
-        old_ref = self._ref_path(current_branch)
+        source_branch = old_name or current_branch
+        if not source_branch:
+            raise BranchError("No branch to rename")
+        validate_branch_name(source_branch)
+        if source_branch == new_name:
+            return source_branch
+        old_ref = self._ref_path(source_branch)
         new_ref = self._ref_path(new_name)
         if new_ref.exists() and not force:
             raise BranchError(f"Branch '{new_name}' already exists")
         if not old_ref.exists():
-            raise BranchError(f"Branch '{current_branch}' does not exist")
+            raise BranchError(f"Branch '{source_branch}' does not exist")
 
         if new_ref.exists() and force:
             new_ref.unlink()
 
         new_ref.write_text(old_ref.read_text(encoding="utf-8"), encoding="utf-8")
         old_ref.unlink()
-        temp_head = self.head_file.with_suffix(".tmp")
-        temp_head.write_text(f"ref: refs/heads/{new_name}\n", encoding="utf-8")
-        temp_head.replace(self.head_file)
-        print(f"Renamed branch '{current_branch}' to '{new_name}'")
+
+        if source_branch == current_branch:
+            temp_head = self.head_file.with_suffix(".tmp")
+            temp_head.write_text(f"ref: refs/heads/{new_name}\n", encoding="utf-8")
+            temp_head.replace(self.head_file)
+        print(f"Renamed branch '{source_branch}' to '{new_name}'")
         return new_name
 
     def add_remote(self, name: str, url: str) -> str:
         """Configure remote name and URL in repo config."""
         if not name:
             name = "origin"
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+            raise RemoteError(f"Invalid remote name '{name}'")
+        if not isinstance(url, str) or not url.strip() or "\x00" in url:
+            raise RemoteError("Remote URL must be a non-empty local filesystem path")
         remote_file = self.git_dir / "config"
         remotes: dict[str, str] = {}
         if remote_file.exists():
@@ -366,8 +406,38 @@ class Repository:
         print(f"Added or updated remote '{name}' -> '{url}'")
         return name
 
+    def set_upstream(self, branch: str, remote: str) -> None:
+        """Record which remote a branch tracks, in a file separate from the
+        remotes config so it never shows up as a fake remote entry."""
+        upstream_file = self.git_dir / "upstream"
+        upstreams: dict[str, str] = {}
+        if upstream_file.exists():
+            try:
+                data = json.loads(upstream_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    upstreams = data
+            except json.JSONDecodeError:
+                upstreams = {}
+        upstreams[branch] = remote
+        temp_file = upstream_file.with_suffix(".tmp")
+        temp_file.write_text(json.dumps(upstreams, indent=2), encoding="utf-8")
+        temp_file.replace(upstream_file)
+
+    def get_upstream(self, branch: str) -> str | None:
+        """Return the remote a branch tracks, or None if it has no upstream set."""
+        upstream_file = self.git_dir / "upstream"
+        if not upstream_file.exists():
+            return None
+        try:
+            data = json.loads(upstream_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        return data.get(branch) if isinstance(data, dict) else None
+
     def get_remote(self, name: str) -> str:
         """Read URL for a remote name."""
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+            raise RemoteError(f"Invalid remote name '{name}'")
         remote_file = self.git_dir / "config"
         if not remote_file.exists():
             raise RemoteError(f"Remote '{name}' does not exist")
@@ -466,64 +536,278 @@ class Repository:
         print(f"Rebased branch '{current_branch}' onto '{branch_name}'")
         return current_branch
 
+    def _resolve_remote_repository(self, remote_name: str) -> Repository:
+        """Resolve a configured local-path remote and verify it is a PyGit repo."""
+        remote_url = self.get_remote(remote_name)
+        if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", remote_url) or remote_url.startswith("git@"):
+            raise RemoteError(
+                f"Remote '{remote_name}' is set to '{remote_url}', which looks like a remote Git URL. "
+                "PyGit only supports pushing to a local filesystem path to another PyGit repository "
+                "(e.g. '../other-repo'), not a remote transport."
+            )
+        remote_path = Path(remote_url).expanduser()
+        if not remote_path.is_absolute():
+            remote_path = (self.path / remote_path).resolve()
+        else:
+            remote_path = remote_path.resolve()
+
+        remote_repo = Repository(remote_path)
+        if remote_repo.path == self.path:
+            raise RemoteError("A repository cannot push to itself")
+        if not remote_repo.git_dir.is_dir() or not remote_repo.object_dir.is_dir():
+            raise RemoteError("Remote repository is not a valid PyGit repository")
+        if not remote_repo.heads_dir.is_dir():
+            raise RemoteError("Remote repository is missing branch references")
+        return remote_repo
+
+    def _object_file_path(self, obj_hash: str) -> Path:
+        """Return the sharded object path after validating its hash."""
+        validate_object_hash(obj_hash)
+        return self.object_dir / obj_hash[:2] / obj_hash[2:]
+
+    def _collect_tree_objects(self, tree_hash: str, objects: set[str]) -> None:
+        """Add a tree and every object referenced by it to ``objects``."""
+        if tree_hash in objects:
+            return
+        tree_object = self.read_object(tree_hash)
+        if tree_object.type != "tree":
+            raise RepositoryError(f"Object {tree_hash} is not a tree")
+        objects.add(tree_hash)
+
+        try:
+            entries = Tree.from_content(tree_object.content).entries
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise RepositoryError(f"Tree object {tree_hash} is corrupt") from exc
+
+        for _, mode, child_hash in entries:
+            validate_object_hash(child_hash)
+            if mode == TREE_MODE:
+                self._collect_tree_objects(child_hash, objects)
+            elif mode == BLOB_MODE:
+                blob = self.read_object(child_hash)
+                if blob.type != "blob":
+                    raise RepositoryError(f"Object {child_hash} is not a blob")
+                objects.add(child_hash)
+            else:
+                raise RepositoryError(f"Unsupported tree entry mode '{mode}'")
+
+    def _collect_push_objects(self, commit_hash: str) -> set[str]:
+        """Collect commits, trees, and blobs reachable from a branch head."""
+        objects: set[str] = set()
+
+        def visit_commit(current_hash: str) -> None:
+            if current_hash in objects:
+                return
+            commit_data = self._parse_commit(current_hash)
+            tree_hash = commit_data["tree"]
+            parents = commit_data["parents"]
+            if not isinstance(tree_hash, str) or not tree_hash:
+                raise RepositoryError(f"Commit {current_hash} has no valid tree")
+            if not isinstance(parents, list):
+                raise RepositoryError(f"Commit {current_hash} has invalid parents")
+
+            objects.add(current_hash)
+            self._collect_tree_objects(tree_hash, objects)
+            for parent_hash in parents:
+                if not isinstance(parent_hash, str):
+                    raise RepositoryError(f"Commit {current_hash} has an invalid parent")
+                visit_commit(parent_hash)
+
+        validate_object_hash(commit_hash)
+        visit_commit(commit_hash)
+        return objects
+
+    def _tracking_ref_path(self, remote: str, branch: str) -> Path:
+        return self.ref_dir / "remotes" / remote / branch
+
+    def _write_tracking_ref(self, remote: str, branch: str, commit_hash: str) -> None:
+        """Atomically update the local remote-tracking reference."""
+        tracking_ref = self._tracking_ref_path(remote, branch)
+        tracking_ref.parent.mkdir(parents=True, exist_ok=True)
+        temp_file = tracking_ref.with_suffix(".tmp")
+        temp_file.write_text(commit_hash, encoding="utf-8")
+        temp_file.replace(tracking_ref)
+
+    def _copy_object_to_remote(self, obj_hash: str, remote_repo: Repository) -> bool:
+        """Copy one verified object to a remote if the remote does not have it."""
+        source = self._object_file_path(obj_hash)
+        if not source.is_file():
+            raise RepositoryError(f"Object {obj_hash} not found")
+        self.read_object(obj_hash)
+
+        destination = remote_repo._object_file_path(obj_hash)
+        if destination.exists():
+            remote_repo.read_object(obj_hash)
+            return False
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_file = destination.with_suffix(".tmp")
+        temp_file.write_bytes(source.read_bytes())
+        temp_file.replace(destination)
+        return True
+
     def push_branch(
         self,
         remote: str,
         branch: str | None = None,
         delete: bool = False,
         set_upstream: bool = False,
-    ) -> str:
-        """Push or delete a branch on a remote via git CLI."""
-        if delete and not branch:
-            raise BranchError("Branch name is required for delete")
-
-        # This is a frequent typo and otherwise leads to a confusing Git error.
+    ) -> dict[str, Any]:
+        """Push a branch and its reachable PyGit objects to a local PyGit remote."""
         if remote == "orgin":
             raise RemoteError("Remote 'orgin' was not found. Did you mean 'origin'?")
-
-        if not re.match(r"^[A-Za-z0-9._-]+$", remote):
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", remote):
             raise RemoteError(f"Invalid remote name '{remote}'")
-        if branch and not re.match(r"^[A-Za-z0-9._/-]+$", branch):
-            raise BranchError(f"Invalid branch name '{branch}'")
 
-        command = ["git", "push"]
+        branch = branch or self.get_current_branch()
+        validate_branch_name(branch)
+        remote_repo = self._resolve_remote_repository(remote)
+
+        if delete:
+            remote_ref = remote_repo._ref_path(branch)
+            if not remote_ref.exists():
+                raise BranchError(f"Remote branch '{branch}' does not exist")
+            remote_ref.unlink()
+            tracking_ref = self._tracking_ref_path(remote, branch)
+            if tracking_ref.exists():
+                tracking_ref.unlink()
+            message = f"Deleted branch '{branch}' from remote '{remote}'"
+            print(message)
+            return {
+                "success": True,
+                "message": message,
+                "branch": branch,
+                "remote": remote,
+                "commit": "",
+                "objects_pushed": 0,
+            }
+
+        local_ref = self._ref_path(branch)
+        if not local_ref.exists():
+            raise BranchError(f"Branch '{branch}' does not exist")
+        local_head = self._read_ref(branch)
+        if not local_head:
+            raise RemoteError("Nothing to push")
+        validate_object_hash(local_head)
+
+        remote_head = remote_repo._read_ref(branch)
+        if remote_head:
+            validate_object_hash(remote_head)
+            try:
+                local_ancestors = set(self._collect_ancestor_commits(local_head))
+            except RepositoryError as exc:
+                raise RemoteError("Unable to read the local commit graph") from exc
+            if remote_head not in local_ancestors:
+                raise RemoteError(
+                    "Remote branch contains commits not present locally; refusing non-fast-forward push"
+                )
+
+        required_objects = self._collect_push_objects(local_head)
+        transferred = sum(
+            self._copy_object_to_remote(obj_hash, remote_repo)
+            for obj_hash in required_objects
+        )
+        remote_repo._write_ref(branch, local_head)
+        self._write_tracking_ref(remote, branch, local_head)
         if set_upstream:
-            command.extend(["-u", remote])
+            self.set_upstream(branch, remote)
+
+        if transferred == 0 and remote_head == local_head:
+            message = "Everything up-to-date"
         else:
-            command.append(remote)
-
-        if delete:
-            command.extend(["--delete", branch])
-        elif branch:
-            command.append(branch)
-
-        try:
-            subprocess.run(
-                command,
-                check=True,
-                cwd=self.path,
-                text=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            details = (exc.stderr or exc.stdout or "").strip()
-            message = f"git push failed: {details}" if details else f"git push failed: {exc}"
-            raise RemoteError(message) from exc
-        except FileNotFoundError as exc:
-            raise RemoteError("Git is not installed or is not available on PATH") from exc
-
-        pushed_branch = branch or self.get_current_branch()
-        if delete:
-            print(f"Deleted branch '{pushed_branch}' from remote '{remote}'")
-        else:
-            print(f"Pushed branch '{pushed_branch}' to remote '{remote}'")
-        return pushed_branch
+            message = f"Successfully pushed {branch} to {remote}"
+        print(message)
+        return {
+            "success": True,
+            "message": message,
+            "branch": branch,
+            "remote": remote,
+            "commit": local_head,
+            "objects_pushed": transferred,
+            "set_upstream": set_upstream,
+        }
 
     def list_branches(self) -> list[str]:
         """List local branches."""
         if not self.heads_dir.exists():
             return []
         return sorted(path.name for path in self.heads_dir.iterdir() if path.is_file())
+
+    def get_branch_commit_count(self, branch: str) -> int:
+        """Count commits reachable from a branch's head."""
+        commit_hash = self._read_ref(branch)
+        if not commit_hash:
+            return 0
+        return len(self._collect_ancestor_commits(commit_hash))
+
+    def _resolve_branch_tree(self, branch: str) -> str:
+        """Return the root tree hash for a branch's HEAD commit, or '' if it has no commits."""
+        if not self._ref_path(branch).exists():
+            raise BranchError(f"Branch '{branch}' does not exist")
+        commit_hash = self._read_ref(branch)
+        if not commit_hash:
+            return ""
+        commit_data = self._parse_commit(commit_hash)
+        tree_hash = commit_data["tree"]
+        return tree_hash if isinstance(tree_hash, str) else ""
+
+    def _walk_tree(self, tree_hash: str, parts: list[str]) -> str:
+        """Descend into a tree object following `parts`, returning the final tree hash."""
+        current_hash = tree_hash
+        for part in parts:
+            tree_obj = self.read_object(current_hash)
+            if tree_obj.type != "tree":
+                raise RepositoryError(f"'{part}' is not a directory")
+            entries = Tree.from_content(tree_obj.content).entries
+            match = next((e for e in entries if e[0] == part), None)
+            if not match or match[1] != TREE_MODE:
+                raise FileError(f"Path component '{part}' not found")
+            current_hash = match[2]
+        return current_hash
+
+    def list_tree(self, branch: str, path: str = "") -> list[dict[str, Any]]:
+        """List entries at `path` inside the given branch's last committed tree (not the working directory)."""
+        tree_hash = self._resolve_branch_tree(branch)
+        if not tree_hash:
+            return []
+        parts = [p for p in path.split("/") if p] if path else []
+        try:
+            current_hash = self._walk_tree(tree_hash, parts)
+        except FileError:
+            return []
+        tree_obj = self.read_object(current_hash)
+        if tree_obj.type != "tree":
+            raise FileError(f"'{path}' is not a directory")
+
+        entries = Tree.from_content(tree_obj.content).entries
+        results = []
+        for name, mode, obj_hash in sorted(entries, key=lambda e: (e[1] != TREE_MODE, e[0])):
+            is_dir = mode == TREE_MODE
+            rel_path = f"{path}/{name}" if path else name
+            size = None
+            if not is_dir:
+                size = len(self.read_object(obj_hash).content)
+            results.append({"name": name, "type": "dir" if is_dir else "file", "size": size, "path": rel_path})
+        return results
+
+    def read_blob(self, branch: str, file_path: str) -> bytes:
+        """Read a file's content as committed on the given branch (not the working directory)."""
+        tree_hash = self._resolve_branch_tree(branch)
+        if not tree_hash:
+            raise FileError(f"Branch '{branch}' has no commits")
+        parts = [p for p in file_path.split("/") if p]
+        if not parts:
+            raise FileError("File path is required")
+
+        parent_hash = self._walk_tree(tree_hash, parts[:-1])
+        tree_obj = self.read_object(parent_hash)
+        if tree_obj.type != "tree":
+            raise FileError(f"File '{file_path}' not found in branch '{branch}'")
+        entries = Tree.from_content(tree_obj.content).entries
+        match = next((e for e in entries if e[0] == parts[-1]), None)
+        if not match or match[1] != BLOB_MODE:
+            raise FileError(f"File '{file_path}' not found in branch '{branch}'")
+        return self.read_object(match[2]).content
 
     def status(self) -> str:
         """Return status string showing current branch, staged files, and untracked files."""

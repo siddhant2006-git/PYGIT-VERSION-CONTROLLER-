@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useRepository } from '../hooks/useRepository';
 import RepositoryHeader from '../components/RepositoryHeader';
 import CommitModal from '../components/CommitModal';
-import { createBranch, checkoutBranch, deleteBranch, renameBranch, push } from '../services/api';
+import { createBranch, checkoutBranch, deleteBranch, renameBranch } from '../services/api';
 import { GitBranch, Plus, Trash2, Edit2, Check, X, ArrowRight, Shield } from 'lucide-react';
 
 export default function Branches() {
@@ -15,7 +15,6 @@ export default function Branches() {
   const [editingBranch, setEditingBranch] = useState(null);
   const [renamedValue, setRenamedValue] = useState('');
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
-  const [pushing, setPushing] = useState(false);
   const [error, setError] = useState('');
 
   const handleCreateBranch = async (e) => {
@@ -70,17 +69,6 @@ export default function Branches() {
     }
   };
 
-  const handlePush = async () => {
-    setPushing(true);
-    try {
-      await push(repoName, 'origin', currentBranch);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPushing(false);
-    }
-  };
-
   return (
     <div>
       <RepositoryHeader
@@ -89,8 +77,6 @@ export default function Branches() {
         currentBranch={currentBranch}
         onSelectBranch={switchBranch}
         onOpenCommitModal={() => setIsCommitModalOpen(true)}
-        onPush={handlePush}
-        pushing={pushing}
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

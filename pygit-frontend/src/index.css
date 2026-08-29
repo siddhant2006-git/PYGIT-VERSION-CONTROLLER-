@@ -31,3 +31,13 @@
 .font-code {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
+
+/* Indeterminate progress bar — used while a push is in flight, since it can
+   take a while on larger repos and there's no real percent-complete signal. */
+@keyframes push-progress-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.animate-push-progress {
+  animation: push-progress-sweep 1.1s ease-in-out infinite;
+}

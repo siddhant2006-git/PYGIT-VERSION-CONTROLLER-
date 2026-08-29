@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useRepository } from '../hooks/useRepository';
 import RepositoryHeader from '../components/RepositoryHeader';
 import CommitModal from '../components/CommitModal';
-import { getRemotes, addRemote, push } from '../services/api';
+import { getRemotes, addRemote } from '../services/api';
 import { Settings as SettingsIcon, Globe, Plus, Check, Link2, Shield, RefreshCw } from 'lucide-react';
 
 export default function Settings() {
@@ -15,7 +15,6 @@ export default function Settings() {
   const [remoteName, setRemoteName] = useState('origin');
   const [remoteUrl, setRemoteUrl] = useState('');
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
-  const [pushing, setPushing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
   useEffect(() => {
@@ -48,17 +47,6 @@ export default function Settings() {
     }
   };
 
-  const handlePush = async () => {
-    setPushing(true);
-    try {
-      await push(repoName, 'origin', currentBranch);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPushing(false);
-    }
-  };
-
   return (
     <div>
       <RepositoryHeader
@@ -67,8 +55,6 @@ export default function Settings() {
         currentBranch={currentBranch}
         onSelectBranch={switchBranch}
         onOpenCommitModal={() => setIsCommitModalOpen(true)}
-        onPush={handlePush}
-        pushing={pushing}
       />
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
@@ -140,12 +126,12 @@ export default function Settings() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Remote URL</label>
+                <label className="block text-[11px] font-semibold text-slate-400 mb-1">Remote Path</label>
                 <input
                   type="text"
                   value={remoteUrl}
                   onChange={(e) => setRemoteUrl(e.target.value)}
-                  placeholder="https://github.com/user/repo.git"
+                  placeholder="../other-repo (a local PyGit repository path, not a URL)"
                   className="w-full px-3 py-1.5 bg-[#0d1117] text-xs font-mono text-slate-200 border border-[#30363d] rounded-lg focus:outline-none focus:border-blue-500"
                 />
               </div>

@@ -1,19 +1,32 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Code, GitCommit, GitBranch, Settings, Upload, Plus } from 'lucide-react';
+import { Code, GitCommit, GitBranch, Settings, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import BranchSelector from './BranchSelector';
+import CommitButton from './CommitButton';
+import PushButton from './PushButton';
+import { usePush } from '../hooks/usePush';
 
 export default function RepositoryHeader({
   repo,
   branches = [],
   currentBranch = 'main',
   onSelectBranch,
-  onOpenCommitModal,
-  onPush,
-  pushing = false
+  onOpenCommitModal
 }) {
   const location = useLocation();
   const repoName = repo?.name || '';
+  const readOnly = !!repo?.read_only;
+  const {
+    remotes,
+    activeRemote,
+    selectRemote,
+    pushing,
+    result: pushResult,
+    dismiss: dismissPush,
+    run: handlePush,
+    hasRemote,
+    loadingRemotes
+  } = usePush(repoName, currentBranch);
   const currentTab = location.pathname.includes('/commits')
     ? 'commits'
     : location.pathname.includes('/branches')
@@ -51,24 +64,60 @@ export default function RepositoryHeader({
               onSelectBranch={onSelectBranch}
             />
 
-            <button
-              onClick={onOpenCommitModal}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg shadow transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Commit</span>
-            </button>
+            <CommitButton onClick={onOpenCommitModal} disabled={readOnly} title={readOnly ? 'This repository is read-only' : undefined} />
 
-            <button
-              onClick={onPush}
-              disabled={pushing}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-[#30363d] text-slate-200 text-sm font-medium rounded-lg border border-[#30363d] transition-colors disabled:opacity-50"
-            >
-              <Upload className={`w-4 h-4 text-emerald-400 ${pushing ? 'animate-bounce' : ''}`} />
-              <span>{pushing ? 'Pushing...' : 'Push'}</span>
-            </button>
+            <PushButton
+              remotes={remotes}
+              activeRemote={activeRemote}
+              onSelectRemote={selectRemote}
+              pushing={pushing}
+              disabled={pushing || readOnly || !hasRemote}
+              disabledReason={
+                readOnly
+                  ? 'This repository is read-only'
+                  : !hasRemote
+                  ? 'No remote configured — add one in Settings'
+                  : undefined
+              }
+              loadingRemotes={loadingRemotes}
+              onPush={handlePush}
+              branch={currentBranch}
+            />
           </div>
         </div>
+
+        {/* Indeterminate progress — pushes can take a while on larger repos */}
+        {pushing && (
+          <div className="mb-4 h-0.5 w-full bg-[#21262d] rounded-full overflow-hidden">
+            <div className="h-full w-1/4 bg-emerald-500 rounded-full animate-push-progress" />
+          </div>
+        )}
+
+        {/* Push result banner — shared across every repo page */}
+        {pushResult && (
+          <div className={`mb-6 p-4 rounded-xl border flex items-center justify-between text-xs font-mono transition-all ${
+            pushResult.success !== false
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              : 'bg-red-500/10 border-red-500/30 text-red-300'
+          }`}>
+            <div className="flex items-center space-x-2">
+              {pushResult.success !== false
+                ? <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                : <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />}
+              <span>
+                {pushResult.success !== false
+                  ? (pushResult.output || `Pushed ${currentBranch} → ${pushResult.remote}/${pushResult.branch}`) +
+                    (typeof pushResult.objects_pushed === 'number'
+                      ? ` (${pushResult.objects_pushed} object${pushResult.objects_pushed === 1 ? '' : 's'})`
+                      : '')
+                  : `Push failed: ${pushResult.error}`}
+              </span>
+            </div>
+            <button onClick={dismissPush} className="p-1 text-slate-400 hover:text-white flex-shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Repository Navigation Tabs */}
         <div className="flex space-x-2 border-b border-transparent">
