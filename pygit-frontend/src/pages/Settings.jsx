@@ -1,27 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useRepository } from '../hooks/useRepository';
 import RepositoryHeader from '../components/RepositoryHeader';
 import CommitModal from '../components/CommitModal';
+import DeleteRepositoryModal from '../components/DeleteRepositoryModal';
 import { getRemotes, addRemote } from '../services/api';
-import { Settings as SettingsIcon, Globe, Plus, Check, Link2, Shield, RefreshCw } from 'lucide-react';
+import { Settings as SettingsIcon, Globe, Plus, Check, Link2, Shield, RefreshCw, AlertTriangle, Trash2 } from 'lucide-react';
 
 export default function Settings() {
   const { repo: repoName } = useParams();
+  const navigate = useNavigate();
   const { repo, branches, currentBranch, switchBranch, refetch } = useRepository(repoName);
+  const readOnly = !!repo?.read_only;
 
   const [remotes, setRemotes] = useState([]);
   const [loadingRemotes, setLoadingRemotes] = useState(false);
   const [remoteName, setRemoteName] = useState('origin');
   const [remoteUrl, setRemoteUrl] = useState('');
   const [isCommitModalOpen, setIsCommitModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
-  useEffect(() => {
-    loadRemotes();
-  }, [repoName]);
-
-  const loadRemotes = async () => {
+  const loadRemotes = useCallback(async () => {
     setLoadingRemotes(true);
     try {
       const data = await getRemotes(repoName);
@@ -31,7 +31,11 @@ export default function Settings() {
     } finally {
       setLoadingRemotes(false);
     }
-  };
+  }, [repoName]);
+
+  useEffect(() => {
+    loadRemotes();
+  }, [loadRemotes]);
 
   const handleAddRemote = async (e) => {
     e.preventDefault();
@@ -160,6 +164,34 @@ export default function Settings() {
             <li>Staging index storage: <code className="text-purple-400 font-mono">JSON (.pygit/index)</code></li>
           </ul>
         </div>
+
+        {/* Danger Zone */}
+        <div className="card border-red-500/30 rounded-2xl p-6 shadow-sm">
+          <h3 className="text-sm font-bold text-red-400 mb-1 flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4" />
+            <span>Danger Zone</span>
+          </h3>
+          <p className="text-xs text-slate-400 mb-4">
+            {readOnly
+              ? 'This is the built-in demo repository and cannot be deleted.'
+              : 'Deleting a repository removes its .pygit object store and working files. There is no undo.'}
+          </p>
+          <div className="flex items-center justify-between gap-4 p-4 bg-canvas border border-line rounded-xl">
+            <div>
+              <p className="text-xs font-semibold text-slate-200">Delete this repository</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Permanently deletes {repoName} and all of its data.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsDeleteModalOpen(true)}
+              disabled={readOnly}
+              className="btn btn-sm btn-danger flex-shrink-0"
+            >
+              <Trash2 className="w-4 h-4" aria-hidden="true" />
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <CommitModal
@@ -167,6 +199,13 @@ export default function Settings() {
         isOpen={isCommitModalOpen}
         onClose={() => setIsCommitModalOpen(false)}
         onCommitSuccess={refetch}
+      />
+
+      <DeleteRepositoryModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        repoName={repoName}
+        onDeleted={() => navigate('/')}
       />
     </div>
   );

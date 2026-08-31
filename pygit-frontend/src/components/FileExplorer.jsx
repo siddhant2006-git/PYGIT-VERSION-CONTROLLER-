@@ -1,74 +1,145 @@
-import React from 'react';
-import { Folder, FileText, Code2, ChevronRight, File } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { Folder, FileText, Code2, File, CornerLeftUp, FolderOpen } from 'lucide-react';
 import { formatFileSize } from '../utils/formatters';
+import { FileRowSkeleton } from './ui/Skeleton';
 
-export default function FileExplorer({ files = [], onSelectFile, onSelectDirectory, currentPath = '' }) {
-  const getFileIcon = (file) => {
-    if (file.type === 'dir') {
-      return <Folder className="w-4 h-4 text-blue-400 fill-blue-400/20" />;
-    }
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (['py', 'js', 'jsx', 'ts', 'tsx', 'html', 'json', 'toml'].includes(ext)) {
-      return <Code2 className="w-4 h-4 text-amber-400" />;
-    }
-    if (['md', 'txt'].includes(ext)) {
-      return <FileText className="w-4 h-4 text-[#8b949e]" />;
-    }
-    return <File className="w-4 h-4 text-slate-400" />;
-  };
+const CODE_EXTENSIONS = ['py', 'js', 'jsx', 'ts', 'tsx', 'html', 'css', 'json', 'toml', 'yml', 'yaml', 'sh'];
+const DOC_EXTENSIONS = ['md', 'txt', 'rst'];
+
+function FileIcon({ file }) {
+  if (file.type === 'dir') return <Folder className="w-4 h-4 text-blue-400 fill-blue-400/20" aria-hidden="true" />;
+  const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+  if (CODE_EXTENSIONS.includes(ext)) return <Code2 className="w-4 h-4 text-amber-400" aria-hidden="true" />;
+  if (DOC_EXTENSIONS.includes(ext)) return <FileText className="w-4 h-4 text-muted" aria-hidden="true" />;
+  return <File className="w-4 h-4 text-slate-400" aria-hidden="true" />;
+}
+
+/**
+ * Clickable path trail. The explorer previously offered a bare ".." link and a
+ * static path string, so getting from `src/components/ui` back to `src` meant
+ * clicking ".." repeatedly and counting levels.
+ */
+function Breadcrumbs({ currentPath, onNavigate }) {
+  const segments = currentPath ? currentPath.split('/').filter(Boolean) : [];
 
   return (
-    <div className="bg-[#161b22] border border-[#30363d] rounded-xl overflow-hidden shadow-sm">
-      {/* File Explorer Table Header */}
-      <div className="bg-[#21262d] px-4 py-3 border-b border-[#30363d] flex items-center justify-between text-xs font-semibold text-slate-400">
-        <div className="flex items-center space-x-2">
-          <span>Name</span>
-        </div>
-        <div className="flex items-center space-x-8">
-          <span className="hidden sm:inline">Size</span>
-        </div>
+    <nav aria-label="File path" className="flex items-center gap-1 text-xs font-mono min-w-0">
+      <button
+        type="button"
+        onClick={() => onNavigate('')}
+        disabled={segments.length === 0}
+        className="text-slate-300 font-semibold hover:text-blue-400 transition-colors disabled:text-slate-300 disabled:cursor-default"
+      >
+        root
+      </button>
+      {segments.map((segment, index) => {
+        const path = segments.slice(0, index + 1).join('/');
+        const isLast = index === segments.length - 1;
+        return (
+          <React.Fragment key={path}>
+            <span className="text-slate-600" aria-hidden="true">/</span>
+            {isLast ? (
+              <span className="text-slate-200 font-semibold truncate" aria-current="location">{segment}</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onNavigate(path)}
+                className="text-blue-400 hover:underline truncate"
+              >
+                {segment}
+              </button>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </nav>
+  );
+}
+
+export default function FileExplorer({
+  files = [],
+  onSelectFile,
+  onSelectDirectory,
+  onNavigate,
+  currentPath = '',
+  loading = false,
+}) {
+  // Directories first, then alphabetical — the order the backend returns rows
+  // in isn't guaranteed, and a mixed list is hard to scan.
+  const sorted = useMemo(() => {
+    return [...files].sort((a, b) => {
+      if ((a.type === 'dir') !== (b.type === 'dir')) return a.type === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [files]);
+
+  const parentPath = currentPath ? currentPath.split('/').slice(0, -1).join('/') : '';
+
+  return (
+    <section className="card overflow-hidden shadow-sm" aria-label="Files">
+      <div className="bg-elevated px-4 py-2.5 border-b border-line flex items-center justify-between gap-4 text-xs font-semibold text-slate-400">
+        <Breadcrumbs currentPath={currentPath} onNavigate={onNavigate} />
+        <span className="hidden sm:inline flex-shrink-0">Size</span>
       </div>
 
-      {/* Directory Contents List */}
-      <div className="divide-y divide-[#30363d]/50 text-sm">
-        {files.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">
-            This directory is empty.
-          </div>
+      <div className="divide-y divide-line/50">
+        {loading ? (
+          Array.from({ length: 5 }, (_, i) => <FileRowSkeleton key={i} />)
         ) : (
-          files.map((file) => (
-            <div
-              key={file.path || file.name}
-              onClick={() => {
-                if (file.type === 'dir') {
-                  onSelectDirectory && onSelectDirectory(file.path || file.name);
-                } else {
-                  onSelectFile && onSelectFile(file);
-                }
-              }}
-              className="px-4 py-3 flex items-center justify-between hover:bg-[#21262d]/70 transition-colors cursor-pointer group"
-            >
-              <div className="flex items-center space-x-3 truncate">
-                {getFileIcon(file)}
-                <span className={`font-mono text-xs sm:text-sm truncate ${
-                  file.type === 'dir'
-                    ? 'text-slate-200 group-hover:text-blue-400 font-semibold'
-                    : 'text-slate-300 group-hover:text-white'
-                }`}>
-                  {file.name}
-                </span>
-              </div>
+          <>
+            {currentPath && (
+              <button
+                type="button"
+                onClick={() => onNavigate(parentPath)}
+                className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-elevated/70 transition-colors"
+              >
+                <CornerLeftUp className="w-4 h-4 text-slate-500" aria-hidden="true" />
+                <span className="font-mono text-xs sm:text-sm text-slate-400">..</span>
+              </button>
+            )}
 
-              <div className="flex items-center space-x-8 text-xs text-slate-400">
-                <span className="font-mono hidden sm:inline">
-                  {file.type === 'dir' ? '—' : formatFileSize(file.size)}
-                </span>
-                <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-slate-300" />
+            {sorted.length === 0 ? (
+              <div className="px-8 py-12 text-center">
+                <FolderOpen className="w-8 h-8 text-slate-600 mx-auto mb-3" aria-hidden="true" />
+                <p className="text-sm text-slate-400">
+                  {currentPath ? 'This directory is empty.' : 'No files tracked on this branch yet.'}
+                </p>
               </div>
-            </div>
-          ))
+            ) : (
+              sorted.map((file) => {
+                const isDir = file.type === 'dir';
+                const path = file.path || file.name;
+                return (
+                  <button
+                    key={path}
+                    type="button"
+                    onClick={() => (isDir ? onSelectDirectory?.(path) : onSelectFile?.(file))}
+                    aria-label={`${isDir ? 'Open directory' : 'View file'} ${file.name}`}
+                    className="w-full px-4 py-3 flex items-center justify-between gap-4 text-left hover:bg-elevated/70 transition-colors group"
+                  >
+                    <span className="flex items-center gap-3 min-w-0">
+                      <FileIcon file={file} />
+                      <span
+                        className={`font-mono text-xs sm:text-sm truncate ${
+                          isDir
+                            ? 'text-slate-200 group-hover:text-blue-400 font-semibold'
+                            : 'text-slate-300 group-hover:text-white'
+                        }`}
+                      >
+                        {file.name}
+                      </span>
+                    </span>
+
+                    <span className="hidden sm:block font-mono text-xs text-slate-500 flex-shrink-0 tabular-nums">
+                      {isDir ? '—' : formatFileSize(file.size)}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </>
         )}
       </div>
-    </div>
+    </section>
   );
 }

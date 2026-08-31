@@ -30,14 +30,17 @@ export function usePush(repoName, branch) {
     return () => { cancelled = true; };
   }, [repoName]);
 
-  const pickTarget = (list) =>
-    (selectedRemote && list.find((r) => r.name === selectedRemote)) ||
-    list.find((r) => r.name === 'origin') ||
-    list[0] ||
-    null;
+  const pickTarget = useCallback(
+    (list) =>
+      (selectedRemote && list.find((r) => r.name === selectedRemote)) ||
+      list.find((r) => r.name === 'origin') ||
+      list[0] ||
+      null,
+    [selectedRemote]
+  );
 
   // What the button shows *before* pushing — the remote that will actually be used.
-  const activeRemote = useMemo(() => pickTarget(remotes || []), [remotes, selectedRemote]);
+  const activeRemote = useMemo(() => pickTarget(remotes || []), [remotes, pickTarget]);
 
   const run = useCallback(async () => {
     if (!repoName) return;
@@ -57,8 +60,7 @@ export function usePush(repoName, branch) {
     } finally {
       setPushing(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoName, branch, selectedRemote]);
+  }, [repoName, branch, pickTarget]);
 
   return {
     remotes: remotes || [],

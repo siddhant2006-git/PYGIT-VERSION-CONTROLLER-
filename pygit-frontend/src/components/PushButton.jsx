@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Upload, ChevronDown, Check } from 'lucide-react';
+import { useDismiss } from '../hooks/useDismiss';
 
 /**
  * Push button that shows the target remote up front ("Push · origin")
@@ -16,27 +17,14 @@ export default function PushButton({
   disabledReason,
   loadingRemotes,
   onPush,
-  branch
+  branch,
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const triggerRef = useRef(null);
+  const close = useCallback(() => setIsOpen(false), []);
+  const containerRef = useDismiss(isOpen, close, triggerRef);
 
   const canPickRemote = remotes.length > 1;
-  const buttonTitle = disabled
-    ? disabledReason
-    : activeRemote
-    ? `Push ${branch} to ${activeRemote.name}\n(${activeRemote.url})`
-    : undefined;
 
   const label = pushing
     ? 'Pushing…'
@@ -45,58 +33,79 @@ export default function PushButton({
     : `Push · ${activeRemote.name}`;
 
   return (
-    <div className="relative" ref={dropdownRef}>
-      <div className="flex items-stretch">
+    <div className="relative" ref={containerRef}>
+      {/* The tooltip sits on the wrapper because a disabled <button> doesn't
+          reliably surface its own title attribute. */}
+      <span
+        className="flex items-stretch"
+        title={
+          disabled
+            ? disabledReason
+            : activeRemote
+            ? `Push ${branch} to ${activeRemote.name} (${activeRemote.url})`
+            : undefined
+        }
+      >
         <button
+          type="button"
           onClick={onPush}
           disabled={disabled}
-          title={buttonTitle}
-          className={`flex items-center space-x-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-[#30363d] text-slate-200 text-sm font-medium border border-[#30363d] transition-colors disabled:opacity-50 disabled:hover:bg-[#21262d] ${
-            canPickRemote ? 'rounded-l-lg border-r-0' : 'rounded-lg'
-          }`}
+          className={`btn btn-sm btn-neutral font-medium ${canPickRemote ? 'rounded-r-none border-r-0' : ''}`}
         >
-          <Upload className={`w-4 h-4 text-emerald-400 flex-shrink-0 ${pushing ? 'animate-bounce' : ''}`} />
-          <span className="whitespace-nowrap">{label}</span>
+          <Upload
+            className={`w-4 h-4 text-emerald-400 flex-shrink-0 ${pushing ? 'animate-pulse' : ''}`}
+            aria-hidden="true"
+          />
+          <span>{label}</span>
         </button>
 
         {canPickRemote && (
           <button
-            onClick={() => setIsOpen((v) => !v)}
+            type="button"
+            ref={triggerRef}
+            onClick={() => setIsOpen((open) => !open)}
             disabled={pushing || disabled}
-            title="Choose a different remote"
-            className="px-1.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] text-slate-400 hover:text-slate-200 border border-[#30363d] rounded-r-lg transition-colors disabled:opacity-50"
+            aria-expanded={isOpen}
+            aria-haspopup="listbox"
+            aria-label="Choose a different remote"
+            className="btn-icon px-1.5 bg-elevated hover:bg-line text-slate-400 hover:text-slate-200 border border-line rounded-l-none"
           >
-            <ChevronDown className="w-4 h-4" />
+            <ChevronDown
+              className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+              aria-hidden="true"
+            />
           </button>
         )}
-      </div>
+      </span>
 
       {isOpen && canPickRemote && (
-        <div className="absolute right-0 top-full mt-2 w-72 bg-[#161b22] border border-[#30363d] rounded-xl shadow-2xl z-50 overflow-hidden">
-          <div className="px-3 py-1.5 text-xs font-semibold text-slate-400 border-b border-[#30363d]/40">
-            Push {branch} to
-          </div>
-          <div className="max-h-56 overflow-y-auto py-1">
-            {remotes.map((r) => {
-              const isSelected = activeRemote?.name === r.name;
+        <div className="absolute right-0 top-full mt-2 w-72 card rounded-xl shadow-2xl z-50 overflow-hidden animate-pop-in">
+          <p className="px-3 py-2 text-xs font-semibold text-slate-400 border-b border-line/40">
+            Push <span className="font-mono text-slate-300">{branch}</span> to
+          </p>
+          <div role="listbox" aria-label="Remotes" className="max-h-56 overflow-y-auto overscroll-none-y py-1">
+            {remotes.map((remote) => {
+              const isSelected = activeRemote?.name === remote.name;
               return (
                 <button
-                  key={r.name}
+                  key={remote.name}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
                   onClick={() => {
-                    onSelectRemote(r.name);
-                    setIsOpen(false);
+                    onSelectRemote(remote.name);
+                    close();
+                    triggerRef.current?.focus();
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-left transition-colors ${
-                    isSelected
-                      ? 'bg-blue-600/10 text-blue-400'
-                      : 'text-slate-300 hover:bg-[#21262d] hover:text-white'
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors ${
+                    isSelected ? 'bg-blue-600/10 text-blue-400' : 'text-slate-300 hover:bg-elevated hover:text-white'
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="text-xs font-mono font-semibold truncate">{r.name}</div>
-                    <div className="text-[10px] text-slate-500 font-mono truncate">{r.url}</div>
-                  </div>
-                  {isSelected && <Check className="w-4 h-4 text-blue-400 ml-2 flex-shrink-0" />}
+                  <span className="min-w-0">
+                    <span className="block text-xs font-mono font-semibold truncate">{remote.name}</span>
+                    <span className="block text-[10px] text-slate-500 font-mono truncate">{remote.url}</span>
+                  </span>
+                  {isSelected && <Check className="w-4 h-4 text-blue-400 flex-shrink-0" aria-hidden="true" />}
                 </button>
               );
             })}

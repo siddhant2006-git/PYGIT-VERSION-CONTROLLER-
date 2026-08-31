@@ -1,32 +1,45 @@
-import React, { useState } from 'react';
-import { X, FolderPlus, Sparkles } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { FolderPlus, Sparkles, Loader2 } from 'lucide-react';
 import { createRepository } from '../services/api';
+import { validateRepoName } from '../utils/validation';
+import Modal from './ui/Modal';
+import Alert from './ui/Alert';
+
+const BLANK = {
+  name: '',
+  description: '',
+  visibility: 'public',
+  initialize_readme: true,
+  initial_branch: 'main',
+};
 
 export default function CreateRepositoryModal({ isOpen, onClose, onCreated }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    visibility: 'public',
-    initialize_readme: true,
-    initial_branch: 'main'
-  });
+  const [formData, setFormData] = useState(BLANK);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [touched, setTouched] = useState(false);
 
-  if (!isOpen) return null;
+  // Start clean on every open — the dialog used to keep whatever half-typed
+  // name and error banner were left behind by the previous attempt.
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData(BLANK);
+    setError('');
+    setTouched(false);
+  }, [isOpen]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.name.trim()) {
-      setError('Repository name is required');
-      return;
-    }
+  const nameError = validateRepoName(formData.name);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setTouched(true);
+    if (nameError) return;
 
     setSubmitting(true);
     setError('');
     try {
       const newRepo = await createRepository(formData);
-      onCreated && onCreated(newRepo);
+      onCreated?.(newRepo);
       onClose();
     } catch (err) {
       setError(err.message || 'Failed to create repository');
@@ -36,83 +49,81 @@ export default function CreateRepositoryModal({ isOpen, onClose, onCreated }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-[#161b22] border border-[#30363d] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-        <div className="bg-[#21262d] px-6 py-4 border-b border-[#30363d] flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <FolderPlus className="w-5 h-5 text-emerald-400" />
-            <h2 className="text-lg font-bold text-white tracking-tight">Create Repository</h2>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white p-1 rounded-lg">
-            <X className="w-5 h-5" />
-          </button>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Create repository"
+      description="Initialises a new .pygit directory on the backend."
+      icon={<FolderPlus className="w-5 h-5 text-emerald-400 flex-shrink-0" aria-hidden="true" />}
+    >
+      <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        {error && <Alert variant="error" onDismiss={() => setError('')}>{error}</Alert>}
+
+        <div>
+          <label htmlFor="new-repo-name" className="field-label">Repository name *</label>
+          <input
+            id="new-repo-name"
+            data-autofocus
+            type="text"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            onBlur={() => setTouched(true)}
+            placeholder="my-python-project"
+            aria-invalid={touched && !!nameError}
+            aria-describedby="new-repo-name-hint"
+            className={`input input-md font-mono ${touched && nameError ? 'border-red-500/60 focus:border-red-500 focus:ring-red-500' : ''}`}
+          />
+          <p
+            id="new-repo-name-hint"
+            className={`text-[11px] mt-1.5 ${touched && nameError ? 'text-red-400' : 'text-slate-500'}`}
+          >
+            {touched && nameError ? nameError : 'Letters, numbers, dots, hyphens and underscores.'}
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
-              {error}
-            </div>
-          )}
+        <div>
+          <label htmlFor="new-repo-description" className="field-label">
+            Description <span className="text-slate-500 font-normal normal-case">(optional)</span>
+          </label>
+          <input
+            id="new-repo-description"
+            type="text"
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            placeholder="A lightweight version control system"
+            className="input input-md"
+          />
+        </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Repository Name *
-            </label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              placeholder="my-python-project"
-              className="w-full px-3.5 py-2.5 bg-[#0d1117] text-sm text-slate-100 placeholder-slate-500 border border-[#30363d] rounded-lg focus:outline-none focus:border-blue-500"
-              required
-            />
-          </div>
+        <label className="flex items-start gap-3 p-3 bg-canvas border border-line rounded-xl cursor-pointer hover:border-slate-500 transition-colors">
+          <input
+            type="checkbox"
+            checked={formData.initialize_readme}
+            onChange={(e) => setFormData({ ...formData, initialize_readme: e.target.checked })}
+            className="w-4 h-4 mt-0.5 rounded border-line bg-surface text-emerald-600 focus:ring-emerald-500 flex-shrink-0"
+          />
+          <span>
+            <span className="block text-xs font-semibold text-slate-200">Initialize with README.md</span>
+            <span className="block text-[11px] text-slate-400 mt-0.5">
+              Creates the file and records an initial commit, so the repository isn&apos;t empty.
+            </span>
+          </span>
+        </label>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Description
-            </label>
-            <input
-              type="text"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="A lightweight version control system"
-              className="w-full px-3.5 py-2 bg-[#0d1117] text-sm text-slate-100 placeholder-slate-500 border border-[#30363d] rounded-lg focus:outline-none focus:border-blue-500"
-            />
-          </div>
-
-          <div className="flex items-center space-x-4 pt-2">
-            <label className="flex items-center space-x-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={formData.initialize_readme}
-                onChange={(e) => setFormData({ ...formData, initialize_readme: e.target.checked })}
-                className="w-4 h-4 rounded border-[#30363d] bg-[#0d1117] text-emerald-600 focus:ring-emerald-500"
-              />
-              <span className="text-xs text-slate-300">Initialize with README.md</span>
-            </label>
-          </div>
-
-          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-[#30363d]">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-[#21262d] hover:bg-[#30363d] text-slate-300 text-sm font-medium rounded-lg"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex items-center space-x-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg shadow"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>{submitting ? 'Creating...' : 'Create'}</span>
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-line">
+          <button type="button" onClick={onClose} className="btn btn-md btn-neutral">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn btn-md btn-success">
+            {submitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Sparkles className="w-4 h-4" aria-hidden="true" />
+            )}
+            <span>{submitting ? 'Creating…' : 'Create'}</span>
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

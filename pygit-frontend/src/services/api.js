@@ -228,6 +228,22 @@ export const getRepository = async (name) => {
   );
 };
 
+export const deleteRepository = async (name) => {
+  return request(
+    () => client.delete(`/repositories/${name}`),
+    () => {
+      mockRepositories = mockRepositories.filter((r) => r.name !== name);
+      delete mockCommits[name];
+      delete mockBranches[name];
+      delete mockFiles[name];
+      delete mockStatus[name];
+      delete mockRemotes[name];
+      return { message: `Deleted repository ${name}` };
+    },
+    'deleteRepository'
+  );
+};
+
 export const getRepositoryFiles = async (name, branch = 'main', path = '') => {
   return request(
     () => client.get(`/repositories/${name}/files`, { params: { branch, path } }),

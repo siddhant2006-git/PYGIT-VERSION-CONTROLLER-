@@ -1,38 +1,51 @@
 import React from 'react';
+import { GitCommit, SearchX } from 'lucide-react';
 import CommitCard from './CommitCard';
-import { GitCommit } from 'lucide-react';
+import Alert from './ui/Alert';
+import EmptyState from './ui/EmptyState';
+import { CommitCardSkeleton } from './ui/Skeleton';
 
-export default function CommitList({ commits = [], loading = false, error = null }) {
+export default function CommitList({ commits = [], loading = false, error = null, filtered = false, onClearFilter }) {
   if (loading) {
     return (
-      <div className="p-8 text-center text-slate-400 space-y-3">
-        <GitCommit className="w-8 h-8 text-blue-400 animate-spin mx-auto" />
-        <p className="text-sm">Loading commit history...</p>
+      <div className="space-y-3" aria-busy="true" aria-label="Loading commit history">
+        {Array.from({ length: 4 }, (_, i) => <CommitCardSkeleton key={i} />)}
       </div>
     );
   }
 
   if (error) {
-    return (
-      <div className="p-6 bg-red-500/10 border border-red-500/20 rounded-xl text-center text-red-400 text-sm">
-        Unable to load commit history: {error}
-      </div>
-    );
+    return <Alert variant="error">Unable to load commit history: {error}</Alert>;
   }
 
   if (commits.length === 0) {
-    return (
-      <div className="p-8 bg-[#161b22] border border-[#30363d] rounded-xl text-center text-slate-400 text-sm">
-        No commits found in this branch yet.
-      </div>
+    return filtered ? (
+      <EmptyState
+        icon={SearchX}
+        title="No matching commits"
+        description="No commit on this branch matches your search. Try a shorter term, an author name, or a SHA prefix."
+        action={
+          onClearFilter && (
+            <button onClick={onClearFilter} className="btn btn-sm btn-neutral">Clear search</button>
+          )
+        }
+      />
+    ) : (
+      <EmptyState
+        icon={GitCommit}
+        title="No commits yet"
+        description="This branch has no history. Use the Commit button to stage your working-tree changes and record the first one."
+      />
     );
   }
 
   return (
-    <div className="space-y-3">
+    <ol className="space-y-3 list-none">
       {commits.map((commit) => (
-        <CommitCard key={commit.hash} commit={commit} />
+        <li key={commit.hash}>
+          <CommitCard commit={commit} />
+        </li>
       ))}
-    </div>
+    </ol>
   );
 }

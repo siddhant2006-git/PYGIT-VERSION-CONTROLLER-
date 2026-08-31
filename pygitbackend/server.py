@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -231,6 +232,17 @@ def get_repository_info(repo_name: str):
     if (repo.path / ".description").exists():
         desc = (repo.path / ".description").read_text(encoding="utf-8").strip()
     return calculate_repo_stats(repo, repo_name, desc)
+
+
+@app.delete("/api/repositories/{repo_name}")
+def delete_repository(repo_name: str):
+    """Permanently delete a repository and all of its data."""
+    repo = get_repo(repo_name, auto_create=False, allow_root=False)
+    try:
+        shutil.rmtree(repo.path)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete repository '{repo_name}': {e}")
+    return {"message": f"Deleted repository '{repo_name}'"}
 
 
 @app.get("/api/repositories/{repo_name}/files")

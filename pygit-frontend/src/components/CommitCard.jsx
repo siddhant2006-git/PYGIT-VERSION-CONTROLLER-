@@ -1,61 +1,93 @@
-import React from 'react';
-import { GitCommit, User, Calendar, FileCode, Copy, Check } from 'lucide-react';
-import { shortSha, formatRelativeTime } from '../utils/formatters';
+import React, { useState } from 'react';
+import { User, Clock, FileCode, Copy, Check, ChevronDown } from 'lucide-react';
+import { shortSha, formatRelativeTime, formatAbsoluteTime, parseAuthor } from '../utils/formatters';
+import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 
 export default function CommitCard({ commit }) {
-  const [copied, setCopied] = React.useState(false);
+  const { copied, copy } = useCopyToClipboard();
+  const [showFiles, setShowFiles] = useState(false);
 
-  const copySha = () => {
-    navigator.clipboard.writeText(commit.hash);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const author = parseAuthor(commit.author);
+  const files = commit.files_changed || [];
+  // Git convention: first line is the subject, the rest is the body.
+  const [subject, ...bodyLines] = (commit.message || '').split('\n');
+  const body = bodyLines.join('\n').trim();
 
   return (
-    <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-4 sm:p-5 hover:border-slate-500/50 transition-all shadow-sm">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-start space-x-3">
-          <div className="p-2 bg-[#21262d] rounded-lg border border-[#30363d] mt-0.5">
-            <GitCommit className="w-4 h-4 text-blue-400" />
-          </div>
-          <div>
-            <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
-              {commit.message}
+    <article className="card p-4 sm:p-5 transition-colors hover:border-slate-500/50 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <span
+            className="w-8 h-8 flex-shrink-0 rounded-full bg-elevated border border-line flex items-center justify-center text-xs font-bold text-slate-300 uppercase"
+            title={author.email || author.name}
+            aria-hidden="true"
+          >
+            {author.name.charAt(0) || <User className="w-4 h-4" />}
+          </span>
+
+          <div className="min-w-0">
+            <h3 className="text-sm sm:text-base font-semibold text-white tracking-tight break-words">
+              {subject || '(no commit message)'}
             </h3>
-            
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs text-slate-400">
-              <div className="flex items-center space-x-1.5">
-                <User className="w-3.5 h-3.5 text-slate-400" />
-                <span className="text-slate-300">{commit.author}</span>
-              </div>
 
-              <div className="flex items-center space-x-1.5">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                <span>{formatRelativeTime(commit.date)}</span>
-              </div>
+            {body && (
+              <p className="mt-1 text-xs text-slate-400 whitespace-pre-wrap break-words">{body}</p>
+            )}
 
-              {commit.files_changed && commit.files_changed.length > 0 && (
-                <div className="flex items-center space-x-1.5">
-                  <FileCode className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{commit.files_changed.length} file(s) changed</span>
-                </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-xs text-slate-400">
+              <span className="text-slate-300 font-medium" title={author.email || undefined}>
+                {author.name}
+              </span>
+
+              <span className="flex items-center gap-1.5" title={formatAbsoluteTime(commit.date)}>
+                <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                {formatRelativeTime(commit.date)}
+              </span>
+
+              {files.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowFiles((open) => !open)}
+                  aria-expanded={showFiles}
+                  className="flex items-center gap-1.5 hover:text-slate-200 transition-colors"
+                >
+                  <FileCode className="w-3.5 h-3.5" aria-hidden="true" />
+                  {files.length} {files.length === 1 ? 'file' : 'files'} changed
+                  <ChevronDown
+                    className={`w-3 h-3 transition-transform ${showFiles ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                  />
+                </button>
               )}
             </div>
+
+            {/* The file list used to be a count only; seeing what a commit
+                touched is the usual next question. */}
+            {showFiles && files.length > 0 && (
+              <ul className="mt-3 space-y-1 border-l-2 border-line pl-3">
+                {files.map((file) => (
+                  <li key={file} className="font-mono text-[11px] text-slate-400 break-all">
+                    {file}
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
 
-        {/* SHA Badge & Copy */}
-        <div className="flex items-center space-x-2 self-start sm:self-center">
-          <button
-            onClick={copySha}
-            title="Copy full SHA"
-            className="flex items-center space-x-1.5 px-2.5 py-1 bg-[#21262d] hover:bg-[#30363d] text-slate-300 font-mono text-xs rounded-lg border border-[#30363d] transition-colors"
-          >
-            <span>{shortSha(commit.hash)}</span>
-            {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-400" />}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => copy(commit.hash)}
+          title={`Copy full SHA\n${commit.hash}`}
+          className="btn btn-xs btn-neutral font-mono self-start flex-shrink-0"
+        >
+          <span>{shortSha(commit.hash)}</span>
+          {copied
+            ? <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" />
+            : <Copy className="w-3 h-3 text-slate-400" aria-hidden="true" />}
+          <span className="sr-only">{copied ? 'SHA copied to clipboard' : 'Copy full SHA'}</span>
+        </button>
       </div>
-    </div>
+    </article>
   );
 }

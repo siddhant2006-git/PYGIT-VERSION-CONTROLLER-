@@ -1,62 +1,116 @@
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { GitBranch, Plus, Search, Terminal, BookOpen } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { GitBranch, Plus, Search, X } from 'lucide-react';
+
+/**
+ * Detects the platform so the search hint reads ⌘K on macOS and Ctrl K
+ * everywhere else, instead of showing one and meaning the other.
+ */
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform || '');
 
 export default function Navbar({ searchQuery, setSearchQuery }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const searchRef = useRef(null);
+
+  // Search filters the repository list, so it only belongs on the dashboard.
+  // It used to sit in the navbar on every page — including repository pages,
+  // where typing in it did nothing visible — and was duplicated by a second
+  // identical field on the dashboard itself.
+  const showSearch = location.pathname === '/';
+
+  // "/" or Cmd/Ctrl+K jumps to search, the convention users already expect.
+  useEffect(() => {
+    if (!showSearch) return;
+    const onKeyDown = (event) => {
+      const target = event.target;
+      const typingElsewhere =
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+
+      const isSlash = event.key === '/' && !typingElsewhere;
+      const isCmdK = event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey);
+      if (!isSlash && !isCmdK) return;
+
+      event.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showSearch]);
 
   return (
-    <header className="bg-[#161b22] border-b border-[#30363d] sticky top-0 z-50">
+    <header className="bg-surface/95 backdrop-blur border-b border-line sticky top-0 z-40">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:btn focus:btn-sm focus:btn-primary"
+      >
+        Skip to content
+      </a>
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Brand Logo & Name */}
-          <div className="flex items-center space-x-6">
-            <Link to="/" className="flex items-center space-x-3 text-white font-bold text-xl tracking-tight group">
-              <div className="p-2 bg-blue-600 rounded-lg group-hover:bg-blue-500 transition-colors shadow-lg shadow-blue-500/20">
-                <GitBranch className="w-5 h-5 text-white" />
-              </div>
-              <span className="bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent font-extrabold">
-                PyGit
-              </span>
-              <span className="px-2 py-0.5 text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full">
-                v0.1
-              </span>
-            </Link>
+        <div className="flex items-center justify-between gap-3 h-16">
+          <Link
+            to="/"
+            className="flex items-center gap-2.5 sm:gap-3 group flex-shrink-0"
+            aria-label="PyGit home"
+          >
+            <span className="p-2 bg-blue-600 rounded-lg group-hover:bg-blue-500 transition-colors shadow-lg shadow-blue-500/20">
+              <GitBranch className="w-5 h-5 text-white" aria-hidden="true" />
+            </span>
+            <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+              PyGit
+            </span>
+            <span className="hidden sm:inline chip bg-blue-500/10 text-blue-400 border-blue-500/20">
+              v0.1
+            </span>
+          </Link>
 
-            <nav className="hidden md:flex items-center space-x-1">
-              <Link
-                to="/"
-                className="px-3 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-[#21262d] rounded-md transition-colors flex items-center space-x-2"
-              >
-                <BookOpen className="w-4 h-4 text-slate-400" />
-                <span>Repositories</span>
-              </Link>
-            </nav>
-          </div>
-
-          {/* Search & Actions */}
-          <div className="flex items-center space-x-4">
-            {setSearchQuery !== undefined && (
-              <div className="relative w-64 hidden sm:block">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search className="h-4 w-4 text-slate-400" />
-                </div>
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 justify-end">
+            {showSearch && (
+              <div className="relative flex-1 max-w-xs sm:max-w-sm">
+                <Search
+                  className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                  aria-hidden="true"
+                />
                 <input
-                  type="text"
+                  ref={searchRef}
+                  type="search"
                   value={searchQuery || ''}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search repositories..."
-                  className="w-full pl-9 pr-4 py-1.5 bg-[#0d1117] text-sm text-slate-200 placeholder-slate-400 border border-[#30363d] rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                  onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
+                  placeholder="Search repositories…"
+                  aria-label="Search repositories"
+                  className="input input-sm pl-9 pr-16 py-2 [&::-webkit-search-cancel-button]:hidden"
                 />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(''); searchRef.current?.focus(); }}
+                    aria-label="Clear search"
+                    className="btn-icon absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white hover:bg-elevated"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <kbd
+                    aria-hidden="true"
+                    className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 items-center h-5 px-1.5 rounded border border-line bg-elevated text-[10px] font-mono text-slate-500"
+                  >
+                    {IS_MAC ? '⌘K' : 'Ctrl K'}
+                  </kbd>
+                )}
               </div>
             )}
 
             <button
               onClick={() => navigate('/create')}
-              className="flex items-center space-x-2 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg shadow-sm hover:shadow transition-all border border-emerald-500/30"
+              className="btn btn-sm btn-success flex-shrink-0"
             >
-              <Plus className="w-4 h-4" />
-              <span>New Repo</span>
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              <span className="hidden sm:inline">New Repo</span>
+              <span className="sr-only sm:hidden">New repository</span>
             </button>
           </div>
         </div>
