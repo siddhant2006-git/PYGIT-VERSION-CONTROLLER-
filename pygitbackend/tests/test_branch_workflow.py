@@ -2,7 +2,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -108,17 +107,28 @@ class BranchWorkflowTests(unittest.TestCase):
             self.assertEqual(repo.get_remote("origin"), "https://github.com")
 
     def test_push_uses_upstream_flag_when_requested(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        with tempfile.TemporaryDirectory() as temp_dir, tempfile.TemporaryDirectory() as remote_dir:
             repo = Repository(temp_dir)
             repo.init()
+            remote_repo = Repository(remote_dir)
+            remote_repo.init()
 
-            with patch("subprocess.run") as mock_run:
-                repo.push_branch("origin", "main", set_upstream=True)
+            Path(temp_dir, "file.txt").write_text("push me", encoding="utf-8")
+            repo.add_path("file.txt")
+            commit_hash = repo.commit("Initial commit")
+            repo.add_remote("origin", remote_dir)
 
+            result = repo.push_branch("origin", "main", set_upstream=True)
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["branch"], "main")
+            self.assertEqual(result["remote"], "origin")
+            self.assertGreater(result["objects_pushed"], 0)
+            self.assertEqual(remote_repo._read_ref("main"), commit_hash)
+            self.assertEqual(repo.get_upstream("main"), "origin")
             self.assertEqual(
-                mock_run.call_args.args[0], ["git", "push", "-u", "origin", "main"]
+                remote_repo.read_blob("main", "file.txt"), b"push me"
             )
-            self.assertEqual(mock_run.call_args.kwargs["cwd"], repo.path)
 
     def test_push_reports_common_origin_typo(self):
         with tempfile.TemporaryDirectory() as temp_dir:
