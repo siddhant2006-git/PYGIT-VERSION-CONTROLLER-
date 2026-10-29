@@ -129,7 +129,7 @@ src/
 ### Data flow
 
 - `services/api.js` wraps every backend endpoint in a typed function (`getRepositories`, `createRepository`, `getCommits`, `commit`, `push`, ...).
-- Each API call **falls back to in-memory mock data** if the backend request fails, so the UI stays usable offline/in preview.
+- Demo data is only used when `VITE_USE_MOCKS=true`; otherwise API failures surface instead of being mistaken for saved backend changes.
 - `hooks/` fetch and cache data per page (repositories list, a single repository, its commits) and expose loading/error state to `pages/`.
 - `pages/` compose `components/` and pass data down as props; components stay presentational.
 
@@ -144,14 +144,14 @@ npm run build      # production build → dist/
 
 ### Configuration
 
-Copy `.env.example` to `.env` at the repo root:
+For local development, Vite proxies `/api` to `http://localhost:8000` automatically. For a deployed frontend, copy `pygit-frontend/.env.example` to `pygit-frontend/.env` and set the backend origin:
 
 ```
 HOST=0.0.0.0
 PORT=8000
 REPOS_DIR=repos
 
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=https://api.example.com
 ```
 
 ---

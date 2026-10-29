@@ -1,59 +1,54 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
   darkMode: 'class',
+  content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
-      // Surface ramp named by role rather than by shade, so components never
-      // hardcode a hex and the whole palette can be retuned in one place.
-      colors: {
-        canvas: '#0d1117',   // page background
-        surface: '#161b22',  // cards, panels, nav, footer
-        elevated: '#21262d', // table headers, chips, secondary buttons
-        line: '#30363d',     // borders and dividers
-        muted: '#8b949e',    // de-emphasised text
-      },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', '"Liberation Mono"', '"Courier New"', 'monospace'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
+      colors: {
+        canvas: {
+          light: '#f6f7f9',
+          dark: '#0b0d12',
+        },
+        surface: {
+          light: '#ffffff',
+          dark: '#12151c',
+        },
+        border: {
+          light: '#e4e7ec',
+          dark: '#232834',
+        },
+        accent: {
+          50: '#eef2ff',
+          100: '#e0e7ff',
+          200: '#c7d2fe',
+          300: '#a5b4fc',
+          400: '#818cf8',
+          500: '#6366f1',
+          600: '#4f46e5',
+          700: '#4338ca',
+          800: '#3730a3',
+          900: '#312e81',
+        },
       },
       keyframes: {
-        // Modal/backdrop entrance.
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
+        'fade-in': {
+          '0%': { opacity: 0, transform: 'translateY(4px)' },
+          '100%': { opacity: 1, transform: 'translateY(0)' },
         },
-        scaleIn: {
-          '0%': { opacity: '0', transform: 'translateY(8px) scale(0.97)' },
-          '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
-        },
-        // Dropdown panels (branch picker, remote picker).
-        popIn: {
-          '0%': { opacity: '0', transform: 'translateY(-4px) scale(0.98)' },
-          '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
-        },
-        // Skeleton placeholders while data loads.
-        shimmer: {
-          '0%': { backgroundPosition: '-200% 0' },
-          '100%': { backgroundPosition: '200% 0' },
-        },
-        // Indeterminate progress bar — a push has no percent-complete signal.
-        pushProgress: {
-          '0%': { transform: 'translateX(-100%)' },
-          '100%': { transform: 'translateX(250%)' },
+        'pop-in': {
+          '0%': { opacity: 0, transform: 'scale(0.96)' },
+          '100%': { opacity: 1, transform: 'scale(1)' },
         },
       },
       animation: {
-        'fade-in': 'fadeIn 150ms ease-out',
-        'scale-in': 'scaleIn 160ms cubic-bezier(0.16, 1, 0.3, 1)',
-        'pop-in': 'popIn 120ms ease-out',
-        shimmer: 'shimmer 1.6s linear infinite',
-        'push-progress': 'pushProgress 1.1s ease-in-out infinite',
+        'fade-in': 'fade-in 0.25s ease-out',
+        'pop-in': 'pop-in 0.15s ease-out',
       },
     },
   },
-  plugins: [],
+  plugins: [require('@tailwindcss/typography')],
 }

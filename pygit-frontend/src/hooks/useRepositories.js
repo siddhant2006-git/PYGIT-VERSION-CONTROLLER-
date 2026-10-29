@@ -1,32 +1,29 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getRepositories } from '../services/api';
+import { useCallback, useEffect, useState } from 'react'
+import { apiStatus, getRepositories } from '../services/api'
 
 export function useRepositories() {
-  const [repositories, setRepositories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [repositories, setRepositories] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [offline, setOffline] = useState(false)
 
-  const fetchRepositories = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError(null)
     try {
-      const data = await getRepositories();
-      setRepositories(data);
+      const data = await getRepositories()
+      setRepositories(data)
+      setOffline(apiStatus.offline)
     } catch (err) {
-      setError(err.message || 'Failed to fetch repositories');
+      setError(err)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    fetchRepositories();
-  }, [fetchRepositories]);
+    refresh()
+  }, [refresh])
 
-  return {
-    repositories,
-    loading,
-    error,
-    refetch: fetchRepositories
-  };
+  return { repositories, loading, error, offline, refresh }
 }

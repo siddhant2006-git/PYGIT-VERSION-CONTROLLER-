@@ -1,425 +1,173 @@
-import axios from 'axios';
-
-// Respect VITE_API_BASE_URL (see .env.example) so a production build talks to the
-// right backend origin instead of relying solely on the dev-server proxy.
-const API_BASE = import.meta.env.VITE_API_BASE_URL
-  ? `${import.meta.env.VITE_API_BASE_URL}/api`
-  : '/api';
-
-// Mock/offline preview mode must be explicitly opted into (VITE_USE_MOCKS=true).
-// When it's off (the default), a failed request rejects like a normal API call
-// so the UI's real error states (retry buttons, error banners) actually fire.
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+import axios from 'axios'
+import {
+  mockRepositories,
+  mockReadme,
+  mockFiles,
+  mockCommits,
+  mockBranches,
+  mockStatus,
+  mockRemotes,
+  findMockRepo,
+} from './mockData'
 
 const client = axios.create({
-  baseURL: API_BASE,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 5000,
-});
+  baseURL: import.meta.env.VITE_API_BASE_URL ? `${import.meta.env.VITE_API_BASE_URL}/api` : '/api',
+  timeout: 8000,
+})
 
-async function request(makeRequest, makeMock, label) {
+// Demo data is available only when explicitly enabled. Silently falling back on
+// every failed request makes a disconnected backend indistinguishable from a
+// working one and can make users believe mutations were persisted.
+const useMocks = import.meta.env.VITE_USE_MOCKS === 'true'
+
+// Flipped to true when a request fails so the UI can surface the connection state.
+export const apiStatus = { offline: false }
+
+async function withFallback(request, fallback) {
   try {
-    const res = await makeRequest();
-    return res.data;
+    const res = await request()
+    apiStatus.offline = false
+    return res.data
   } catch (err) {
-    if (USE_MOCKS) {
-      console.warn(`API offline, using mock data for ${label}:`, err.message);
-      return makeMock(err);
-    }
-    // Axios's err.message is a generic "Request failed with status code 400" —
-    // the actual explanation FastAPI sends lives at err.response.data.detail.
-    // Surface it here once so every caller's err.message is the real reason.
-    const detail = err.response?.data?.detail;
-    if (detail) {
-      const wrapped = new Error(detail);
-      wrapped.status = err.response.status;
-      wrapped.original = err;
-      throw wrapped;
-    }
-    throw err;
+    apiStatus.offline = true
+    if (!useMocks) throw err
+    if (import.meta.env.DEV) console.warn('[pygit] API call failed, using mock data:', err?.message)
+    return typeof fallback === 'function' ? fallback() : fallback
   }
 }
 
-// Mock initial state for offline preview mode
-let mockRepositories = [
-  {
-    name: 'pygit',
-    description: 'Lightweight Git version control system in pure Python',
-    default_branch: 'main',
-    current_branch: 'main',
-    commit_count: 24,
-    branch_count: 3,
-    file_count: 18,
-    last_updated: Math.floor(Date.now() / 1000) - 7200,
-    visibility: 'public',
-    has_readme: true,
-  },
-  {
-    name: 'pygit-core',
-    description: 'PyGit core Python repository',
-    default_branch: 'main',
-    current_branch: 'main',
-    commit_count: 24,
-    branch_count: 3,
-    file_count: 18,
-    last_updated: Math.floor(Date.now() / 1000) - 7200,
-    visibility: 'public',
-    has_readme: true,
-  },
-  {
-    name: 'my-python-app',
-    description: 'Sample web application using FastAPI and PyGit core',
-    default_branch: 'main',
-    current_branch: 'main',
-    commit_count: 8,
-    branch_count: 2,
-    file_count: 12,
-    last_updated: Math.floor(Date.now() / 1000) - 86400,
-    visibility: 'private',
-    has_readme: true,
-  }
-];
+export function getRepositories() {
+  return withFallback(() => client.get('/repositories'), () => mockRepositories)
+}
 
-let mockCommits = {
-  'pygit': [
-    {
-      hash: 'a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0',
-      message: 'Add rebase and fast-forward merge logic',
-      author: 'Siddhant <siddhant@pygit.com>',
-      date: Math.floor(Date.now() / 1000) - 3600 * 2,
-      parents: ['b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef01'],
-      files_changed: ['repository.py', 'cli.py']
-    },
-    {
-      hash: 'b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef01',
-      message: 'Implement atomic object write & JSON index staging',
-      author: 'Siddhant <siddhant@pygit.com>',
-      date: Math.floor(Date.now() / 1000) - 3600 * 24,
-      parents: ['c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef012'],
-      files_changed: ['repository.py', 'models.py']
-    }
-  ],
-  'pygit-core': [
-    {
-      hash: 'a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0',
-      message: 'Add rebase and fast-forward merge logic',
-      author: 'Siddhant <siddhant@pygit.com>',
-      date: Math.floor(Date.now() / 1000) - 3600 * 2,
-      parents: ['b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef01'],
-      files_changed: ['repository.py', 'cli.py']
-    },
-    {
-      hash: 'b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef01',
-      message: 'Implement atomic object write & JSON index staging',
-      author: 'Siddhant <siddhant@pygit.com>',
-      date: Math.floor(Date.now() / 1000) - 3600 * 24,
-      parents: ['c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef012'],
-      files_changed: ['repository.py', 'models.py']
-    },
-    {
-      hash: 'c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef012',
-      message: 'Initial commit: setup PyGit repository model',
-      author: 'Siddhant <siddhant@pygit.com>',
-      date: Math.floor(Date.now() / 1000) - 3600 * 72,
-      parents: [],
-      files_changed: ['README.md', 'main.py', 'cli.py', 'repository.py', 'models.py', 'exceptions.py']
-    }
-  ]
-};
+export function createRepository(payload) {
+  return withFallback(
+    () => client.post('/repositories', payload),
+    () => ({
+      name: payload.name,
+      description: payload.description || '',
+      default_branch: payload.initial_branch || 'main',
+      current_branch: payload.initial_branch || 'main',
+      commit_count: payload.initialize_readme ? 1 : 0,
+      branch_count: 1,
+      file_count: payload.initialize_readme ? 1 : 0,
+      last_updated: Math.floor(Date.now() / 1000),
+      visibility: payload.visibility || 'public',
+      has_readme: !!payload.initialize_readme,
+      read_only: false,
+    })
+  )
+}
 
-let mockBranches = {
-  'pygit-core': [
-    { name: 'main', commit_count: 24, is_default: true },
-    { name: 'feature/fastapi-wrapper', commit_count: 4, is_default: false },
-    { name: 'dev', commit_count: 8, is_default: false },
-  ]
-};
+export function getRepository(name) {
+  return withFallback(() => client.get(`/repositories/${name}`), () => findMockRepo(name))
+}
 
-let mockFiles = {
-  'pygit-core': [
-    { name: 'src', type: 'dir', size: null, path: 'src' },
-    { name: 'tests', type: 'dir', size: null, path: 'tests' },
-    { name: 'main.py', type: 'file', size: 166, path: 'main.py' },
-    { name: 'cli.py', type: 'file', size: 7616, path: 'cli.py' },
-    { name: 'repository.py', type: 'file', size: 20800, path: 'repository.py' },
-    { name: 'models.py', type: 'file', size: 2484, path: 'models.py' },
-    { name: 'exceptions.py', type: 'file', size: 664, path: 'exceptions.py' },
-    { name: 'README.md', type: 'file', size: 3200, path: 'README.md' },
-    { name: 'pyproject.toml', type: 'file', size: 545, path: 'pyproject.toml' }
-  ]
-};
+export function deleteRepository(name) {
+  return withFallback(() => client.delete(`/repositories/${name}`), () => ({ message: `Deleted repository '${name}'` }))
+}
 
-let mockStatus = {
-  'pygit-core': {
-    branch: 'main',
-    staged: ['src/auth.js', 'src/login.jsx'],
-    untracked: ['README.md', 'scratch.py'],
-  }
-};
-
-let mockRemotes = {
-  'pygit-core': [
-    { name: 'origin', url: 'https://github.com/siddhant2006/PYGIT-VERSION-CONTROLLER-.git' }
-  ]
-};
-
-/**
- * API Service functions
- *
- * Every function talks to the real backend first. Mock fallbacks below only
- * run when VITE_USE_MOCKS=true (offline preview mode) — otherwise a failed
- * request rejects normally so callers' error handling actually runs.
- */
-export const getRepositories = async () => {
-  return request(
-    () => client.get('/repositories'),
-    () => mockRepositories,
-    'getRepositories'
-  );
-};
-
-export const createRepository = async (data) => {
-  return request(
-    () => client.post('/repositories', data),
-    () => {
-      const newRepo = {
-        name: data.name,
-        description: data.description || '',
-        default_branch: data.initial_branch || 'main',
-        current_branch: data.initial_branch || 'main',
-        commit_count: data.initialize_readme ? 1 : 0,
-        branch_count: 1,
-        file_count: data.initialize_readme ? 1 : 0,
-        last_updated: Math.floor(Date.now() / 1000),
-        visibility: data.visibility || 'public',
-        has_readme: !!data.initialize_readme,
-      };
-      mockRepositories.unshift(newRepo);
-      if (data.initialize_readme) {
-        mockCommits[data.name] = [{
-          hash: 'init1234567890123456789abcdef0123456789abcdef0123456789abcdef0',
-          message: 'Initial commit with README.md',
-          author: 'Siddhant <siddhant@pygit.com>',
-          date: Math.floor(Date.now() / 1000),
-          parents: [],
-          files_changed: ['README.md']
-        }];
-        mockFiles[data.name] = [
-          { name: 'README.md', type: 'file', size: 120, path: 'README.md' }
-        ];
-      }
-      return newRepo;
-    },
-    'createRepository'
-  );
-};
-
-export const getRepository = async (name) => {
-  return request(
-    () => client.get(`/repositories/${name}`),
-    () => {
-      const repo = mockRepositories.find(r => r.name === name);
-      if (!repo) throw new Error(`Repository ${name} not found`);
-      return repo;
-    },
-    'getRepository'
-  );
-};
-
-export const deleteRepository = async (name) => {
-  return request(
-    () => client.delete(`/repositories/${name}`),
-    () => {
-      mockRepositories = mockRepositories.filter((r) => r.name !== name);
-      delete mockCommits[name];
-      delete mockBranches[name];
-      delete mockFiles[name];
-      delete mockStatus[name];
-      delete mockRemotes[name];
-      return { message: `Deleted repository ${name}` };
-    },
-    'deleteRepository'
-  );
-};
-
-export const getRepositoryFiles = async (name, branch = 'main', path = '') => {
-  return request(
+export function getFiles(name, { branch, path = '' } = {}) {
+  return withFallback(
     () => client.get(`/repositories/${name}/files`, { params: { branch, path } }),
-    () => mockFiles[name] || [
-      { name: 'README.md', type: 'file', size: 250, path: 'README.md' },
-      { name: 'main.py', type: 'file', size: 166, path: 'main.py' }
-    ],
-    'getRepositoryFiles'
-  );
-};
+    () => mockFiles[path] || []
+  )
+}
 
-export const getFileContent = async (name, branch = 'main', path = '') => {
-  return request(
-    () => client.get(`/repositories/${name}/blob/${branch}/${path}`),
-    () => ({
-      name: path,
-      path: path,
-      branch: branch,
-      content: `# ${name}\n\nSample content for ${path} on branch ${branch}.`,
-      last_commit: {
-        message: 'Update ' + path,
-        sha: 'a1b2c3d',
-        date: Math.floor(Date.now() / 1000) - 3600
-      }
-    }),
-    'getFileContent'
-  );
-};
-
-export const getReadme = async (name, branch = 'main') => {
-  return request(
+export function getReadme(name, branch) {
+  return withFallback(
     () => client.get(`/repositories/${name}/readme`, { params: { branch } }),
+    () => ({ content: mockReadme })
+  )
+}
+
+export function getBlob(name, branch, filePath) {
+  return withFallback(
+    () => client.get(`/repositories/${name}/blob/${branch}/${filePath}`),
     () => ({
-      content: `# ${name}\n\nA Python-based Git version control system clone.\n\n## Features\n- Pure Python standard library implementation\n- SHA-256 object storage & zlib compression\n- Branching, rebasing, and remote push capabilities\n\n\`\`\`bash\npygit init\npygit commit -m "Initial commit"\n\`\`\``
-    }),
-    'getReadme'
-  );
-};
+      name: filePath.split('/').pop(),
+      path: filePath,
+      branch,
+      content: filePath.endsWith('.md') ? mockReadme : '# mock file content\nprint("hello from pygit")\n',
+      last_commit: { sha: 'a1b2c3d', message: 'Mock commit', date: Math.floor(Date.now() / 1000) - 3600 },
+    })
+  )
+}
 
-export const getCommits = async (name, branch = 'main') => {
-  return request(
-    () => client.get(`/repositories/${name}/commits`, { params: { branch } }),
-    () => mockCommits[name] || mockCommits['pygit-core'],
-    'getCommits'
-  );
-};
+export function getCommits(name, branch) {
+  return withFallback(() => client.get(`/repositories/${name}/commits`, { params: { branch } }), () => mockCommits)
+}
 
-export const getBranches = async (name) => {
-  return request(
-    () => client.get(`/repositories/${name}/branches`),
-    () => mockBranches[name] || [{ name: 'main', commit_count: 1, is_default: true }],
-    'getBranches'
-  );
-};
+export function getBranches(name) {
+  return withFallback(() => client.get(`/repositories/${name}/branches`), () => mockBranches)
+}
 
-export const createBranch = async (name, branchName) => {
-  return request(
+export function createBranch(name, branchName) {
+  return withFallback(
     () => client.post(`/repositories/${name}/branches`, { name: branchName }),
-    () => {
-      if (!mockBranches[name]) mockBranches[name] = [];
-      mockBranches[name].push({ name: branchName, commit_count: 0, is_default: false });
-      return { name: branchName, message: `Created branch ${branchName}` };
-    },
-    'createBranch'
-  );
-};
+    () => ({ name: branchName, message: `Created branch '${branchName}'` })
+  )
+}
 
-export const checkoutBranch = async (name, branchName) => {
-  return request(
-    () => client.post(`/repositories/${name}/checkout`, { branch: branchName }),
-    () => {
-      const repo = mockRepositories.find(r => r.name === name);
-      if (repo) repo.current_branch = branchName;
-      return { current_branch: branchName, message: `Switched to branch ${branchName}` };
-    },
-    'checkoutBranch'
-  );
-};
+export function checkoutBranch(name, branch) {
+  return withFallback(
+    () => client.post(`/repositories/${name}/checkout`, { branch }),
+    () => ({ current_branch: branch, message: `Switched to branch '${branch}'` })
+  )
+}
 
-export const deleteBranch = async (name, branchName) => {
-  return request(
+export function deleteBranch(name, branchName) {
+  return withFallback(
     () => client.delete(`/repositories/${name}/branches/${branchName}`),
-    () => {
-      if (mockBranches[name]) {
-        mockBranches[name] = mockBranches[name].filter(b => b.name !== branchName);
-      }
-      return { message: `Deleted branch ${branchName}` };
-    },
-    'deleteBranch'
-  );
-};
+    () => ({ message: `Deleted branch '${branchName}'` })
+  )
+}
 
-export const renameBranch = async (name, oldName, newName) => {
-  return request(
+export function renameBranch(name, newName, oldName) {
+  return withFallback(
     () => client.post(`/repositories/${name}/branches/rename`, { old_name: oldName, new_name: newName }),
-    () => {
-      if (mockBranches[name]) {
-        const b = mockBranches[name].find(br => br.name === oldName);
-        if (b) b.name = newName;
-      }
-      return { message: `Renamed branch ${oldName} to ${newName}` };
-    },
-    'renameBranch'
-  );
-};
+    () => ({ message: `Renamed branch to '${newName}'` })
+  )
+}
 
-export const getStatus = async (name) => {
-  return request(
-    () => client.get(`/repositories/${name}/status`),
-    () => mockStatus[name] || { branch: 'main', staged: [], untracked: ['newfile.py'] },
-    'getStatus'
-  );
-};
+export function getStatus(name) {
+  return withFallback(() => client.get(`/repositories/${name}/status`), () => mockStatus)
+}
 
-export const addFiles = async (name, files) => {
-  return request(
+export function addFiles(name, files) {
+  return withFallback(
     () => client.post(`/repositories/${name}/add`, { files }),
-    () => ({ message: `Added ${files.length} file(s) to staging area` }),
-    'addFiles'
-  );
-};
+    () => ({ message: `Staged ${files.length} file(s)` })
+  )
+}
 
-export const commit = async (name, message) => {
-  return request(
-    () => client.post(`/repositories/${name}/commit`, { message }),
-    () => {
-      const newCommit = {
-        hash: Math.random().toString(36).substring(2) + '00000000000000000000000000000000000000000000',
-        message: message,
-        author: 'Siddhant <siddhant@pygit.com>',
-        date: Math.floor(Date.now() / 1000),
-        parents: [],
-        files_changed: ['staged_file.py']
-      };
-      if (!mockCommits[name]) mockCommits[name] = [];
-      mockCommits[name].unshift(newCommit);
-      return newCommit;
-    },
-    'commit'
-  );
-};
+export function commit(name, message, author) {
+  return withFallback(
+    () => client.post(`/repositories/${name}/commit`, { message, author }),
+    () => ({ hash: Math.random().toString(16).slice(2).padEnd(40, '0'), message, author, date: Math.floor(Date.now() / 1000) })
+  )
+}
 
-export const getRemotes = async (name) => {
-  return request(
-    () => client.get(`/repositories/${name}/remotes`),
-    () => mockRemotes[name] || [{ name: 'origin', url: 'https://github.com/user/repo.git' }],
-    'getRemotes'
-  );
-};
+export function getRemotes(name) {
+  return withFallback(() => client.get(`/repositories/${name}/remotes`), () => mockRemotes)
+}
 
-export const addRemote = async (name, remoteData) => {
-  return request(
-    () => client.post(`/repositories/${name}/remotes`, remoteData),
-    () => {
-      if (!mockRemotes[name]) mockRemotes[name] = [];
-      mockRemotes[name].push(remoteData);
-      return { message: `Added remote ${remoteData.name}` };
-    },
-    'addRemote'
-  );
-};
+export function addRemote(name, remoteName, url) {
+  return withFallback(
+    () => client.post(`/repositories/${name}/remotes`, { name: remoteName, url }),
+    () => ({ name: remoteName, url, message: `Configured remote '${remoteName}'` })
+  )
+}
 
-export const push = async (name, remote = 'origin', branch = 'main') => {
-  return request(
-    // Push cost scales with repo size (walks + copies every reachable object),
-    // unlike the other calls here — give it its own budget instead of the
-    // global 5s timeout, so a slow-but-succeeding push isn't aborted client-side
-    // while the server keeps copying.
-    () => client.post(`/repositories/${name}/push`, { remote, branch }, { timeout: 120000 }),
+export function push(name, options = {}) {
+  return withFallback(
+    () => client.post(`/repositories/${name}/push`, options),
     () => ({
       success: true,
-      objects_pushed: 3,
-      branch: branch,
-      remote: remote,
-      output: `3 objects pushed\n${branch} → ${remote}/${branch}`
-    }),
-    'push'
-  );
-};
+      branch: options.branch || 'main',
+      remote: options.remote || 'origin',
+      objects_pushed: 0,
+      output: '(mock) nothing to push — backend unreachable',
+    })
+  )
+}

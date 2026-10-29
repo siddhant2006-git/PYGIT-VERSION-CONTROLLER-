@@ -1,173 +1,78 @@
-import React, { useMemo, useState } from 'react';
-import { useOutletContext, useNavigate } from 'react-router-dom';
-import { BookOpen, Plus, GitBranch, RefreshCw, SearchX } from 'lucide-react';
-import { useRepositories } from '../hooks/useRepositories';
-import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import RepositoryCard from '../components/RepositoryCard';
-import CreateRepositoryModal from '../components/CreateRepositoryModal';
-import Alert from '../components/ui/Alert';
-import EmptyState from '../components/ui/EmptyState';
-import { RepositoryCardSkeleton } from '../components/ui/Skeleton';
+import { FolderGit2, Plus, Search } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import EmptyState from '../components/EmptyState'
+import RepositoryCard from '../components/RepositoryCard'
+import { useRepositories } from '../hooks/useRepositories'
 
-const SORTS = {
-  updated: { label: 'Last updated', compare: (a, b) => (b.last_updated || 0) - (a.last_updated || 0) },
-  name: { label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
-  commits: { label: 'Commits', compare: (a, b) => (b.commit_count || 0) - (a.commit_count || 0) },
-};
+function RepoCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-border-light dark:border-border-dark p-4">
+      <div className="skeleton mb-2 h-5 w-1/3" />
+      <div className="skeleton mb-4 h-4 w-2/3" />
+      <div className="skeleton h-3 w-full" />
+    </div>
+  )
+}
 
 export default function Dashboard() {
-  const { searchQuery, setSearchQuery } = useOutletContext();
-  const { repositories, loading, error, refetch } = useRepositories();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [sortKey, setSortKey] = useState('updated');
-  const navigate = useNavigate();
+  const { repositories, loading } = useRepositories()
+  const [query, setQuery] = useState('')
 
-  useDocumentTitle('Repositories');
-
-  const query = searchQuery.trim().toLowerCase();
-  const visible = useMemo(() => {
-    const matches = repositories.filter((repo) =>
-      repo.name.toLowerCase().includes(query) ||
-      (repo.description || '').toLowerCase().includes(query)
-    );
-    return matches.sort(SORTS[sortKey].compare);
-  }, [repositories, query, sortKey]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return repositories
+    return repositories.filter((r) => r.name.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q))
+  }, [repositories, query])
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 pb-6 border-b border-line">
+    <div className="animate-fade-in">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight flex items-center gap-3">
-            <BookOpen className="w-7 h-7 text-blue-400 flex-shrink-0" aria-hidden="true" />
-            <span>My Repositories</span>
-          </h1>
-          <p className="text-sm text-slate-400 mt-1.5">
-            Manage your PyGit version-controlled projects
-          </p>
+          <h1 className="text-xl font-semibold text-slate-900 dark:text-white">Repositories</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Browse and manage your PyGit repositories.</p>
         </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={refetch}
-            disabled={loading}
-            className="btn btn-sm btn-neutral"
-            title="Reload the repository list"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-          <button onClick={() => setIsModalOpen(true)} className="btn btn-md btn-success">
-            <Plus className="w-4 h-4" aria-hidden="true" />
-            <span>New Repository</span>
-          </button>
-        </div>
+        <Link
+          to="/new"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-accent-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-accent-700"
+        >
+          <Plus size={15} />
+          New repository
+        </Link>
       </div>
 
-      {/* Result count + sort. The search field lives in the navbar (⌘K / "/")
-          rather than being duplicated here. */}
-      {!error && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-          <p aria-live="polite">
-            {loading ? (
-              'Loading repositories…'
-            ) : query ? (
-              <>
-                <strong className="text-slate-200">{visible.length}</strong>
-                {' of '}{repositories.length} repositories match{' '}
-                <span className="font-mono text-slate-300">“{searchQuery.trim()}”</span>
-              </>
-            ) : (
-              <>
-                <strong className="text-slate-200">{repositories.length}</strong>
-                {' '}{repositories.length === 1 ? 'repository' : 'repositories'}
-              </>
-            )}
-          </p>
+      <div className="relative mt-5 max-w-sm">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Find a repository..."
+          className="w-full rounded-lg border border-border-light dark:border-border-dark bg-surface-light dark:bg-surface-dark py-2 pl-9 pr-3 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent-500/50"
+        />
+      </div>
 
-          <label className="flex items-center gap-2">
-            <span className="text-slate-500">Sort by</span>
-            <select
-              value={sortKey}
-              onChange={(e) => setSortKey(e.target.value)}
-              className="input input-sm w-auto py-1 cursor-pointer"
-            >
-              {Object.entries(SORTS).map(([key, { label }]) => (
-                <option key={key} value={key} className="bg-surface">{label}</option>
-              ))}
-            </select>
-          </label>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {loading
+          ? Array.from({ length: 6 }).map((_, i) => <RepoCardSkeleton key={i} />)
+          : filtered.map((repo) => <RepositoryCard key={repo.name} repo={repo} />)}
+      </div>
+
+      {!loading && filtered.length === 0 && (
+        <div className="mt-6">
+          <EmptyState
+            icon={FolderGit2}
+            title={query ? 'No repositories match your search' : 'No repositories yet'}
+            description={query ? 'Try a different search term.' : 'Create your first repository to get started with PyGit.'}
+            action={
+              !query && (
+                <Link to="/new" className="text-sm font-medium text-accent-600 dark:text-accent-400 hover:underline">
+                  Create a repository
+                </Link>
+              )
+            }
+          />
         </div>
       )}
-
-      {loading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {Array.from({ length: 6 }, (_, i) => <RepositoryCardSkeleton key={i} />)}
-        </div>
-      )}
-
-      {!loading && error && (
-        <Alert
-          variant="error"
-          className="max-w-xl mx-auto"
-          action={
-            <button onClick={refetch} className="btn btn-xs btn-danger flex-shrink-0">
-              Retry
-            </button>
-          }
-        >
-          <p className="font-semibold text-sm mb-1">Unable to load repositories</p>
-          <p className="opacity-80 font-mono">{error}</p>
-          <p className="opacity-70 mt-2">Check that the PyGit backend is running on port 8000.</p>
-        </Alert>
-      )}
-
-      {!loading && !error && visible.length === 0 && (
-        query ? (
-          <EmptyState
-            icon={SearchX}
-            title="No matching repositories"
-            description={`Nothing matches “${searchQuery.trim()}”. Try a different name or clear the search.`}
-            action={
-              <button onClick={() => setSearchQuery('')} className="btn btn-sm btn-neutral">
-                Clear search
-              </button>
-            }
-            className="max-w-md mx-auto"
-          />
-        ) : (
-          <EmptyState
-            icon={GitBranch}
-            title="No repositories yet"
-            description="Create your first PyGit repository to start tracking commits, branches and remotes."
-            action={
-              <button onClick={() => setIsModalOpen(true)} className="btn btn-md btn-success">
-                <Plus className="w-4 h-4" aria-hidden="true" />
-                <span>Create repository</span>
-              </button>
-            }
-            className="max-w-md mx-auto"
-          />
-        )
-      )}
-
-      {!loading && !error && visible.length > 0 && (
-        <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 list-none">
-          {visible.map((repo) => (
-            <li key={repo.name}>
-              <RepositoryCard repo={repo} />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <CreateRepositoryModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onCreated={(newRepo) => {
-          refetch();
-          navigate(`/repositories/${newRepo.name}`);
-        }}
-      />
     </div>
-  );
+  )
 }

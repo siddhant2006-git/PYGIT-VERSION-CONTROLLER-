@@ -1,109 +1,124 @@
-import React, { useMemo, useState } from 'react';
-import { FileCode, X, Copy, Check, WrapText } from 'lucide-react';
-import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
-import { formatFileSize } from '../utils/formatters';
-import Spinner from './ui/Spinner';
+import hljs from 'highlight.js'
+import { Check, Copy, FileText, GitCommitHorizontal } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { getBlob } from '../services/api'
+import { fileExtension, isMarkdown, shortHash, timeAgo } from '../utils/formatters'
+import ReadmeViewer from './ReadmeViewer'
+import { PageSpinner } from './Spinner'
 
-// Rendering a gutter row per line is fine for source files but not for a
-// generated 200k-line blob, so the viewer stops and says so instead of
-// locking up the tab.
-const MAX_RENDERED_LINES = 5000;
+const LANGUAGE_BY_EXT = {
+  py: 'python',
+  js: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  json: 'json',
+  sh: 'bash',
+  bash: 'bash',
+  yml: 'yaml',
+  yaml: 'yaml',
+  html: 'xml',
+  css: 'css',
+  toml: 'ini',
+  cfg: 'ini',
+  gitignore: 'plaintext',
+}
 
-export default function FileViewer({ file, branch, content, loading, onClose }) {
-  const [wrap, setWrap] = useState(false);
-  const { copied, copy } = useCopyToClipboard();
+function highlight(code, ext) {
+  const language = LANGUAGE_BY_EXT[ext]
+  try {
+    if (language && hljs.getLanguage(language)) {
+      return hljs.highlight(code, { language }).value
+    }
+    return hljs.highlightAuto(code).value
+  } catch {
+    return hljs.escapeHTML ? hljs.escapeHTML(code) : code
+  }
+}
 
-  const path = file?.path || file?.name || '';
-  const lines = useMemo(() => (content ? content.replace(/\n$/, '').split('\n') : []), [content]);
-  const truncated = lines.length > MAX_RENDERED_LINES;
-  const shown = truncated ? lines.slice(0, MAX_RENDERED_LINES) : lines;
+function PlainCodeViewer({ content, ext }) {
+  const [copied, setCopied] = useState(false)
+  const lines = useMemo(() => content.split('\n'), [content])
+  const html = useMemo(() => highlight(content, ext), [content, ext])
+
+  function handleCopy() {
+    navigator.clipboard?.writeText(content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
 
   return (
-    <section className="card mb-6 overflow-hidden shadow-lg" aria-label={`Contents of ${path}`}>
-      <div className="bg-elevated px-4 py-2.5 border-b border-line flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0 text-xs">
-          <FileCode className="w-4 h-4 text-blue-400 flex-shrink-0" aria-hidden="true" />
-          <span className="font-mono font-semibold text-slate-200 truncate">{path}</span>
-          <span className="hidden sm:inline chip bg-canvas text-slate-500 border-line font-mono">{branch}</span>
+    <div className="relative overflow-hidden rounded-xl border border-border-light dark:border-border-dark bg-[#0d1117]">
+      <button
+        onClick={handleCopy}
+        aria-label="Copy file contents"
+        className="absolute right-3 top-3 z-10 rounded-md border border-white/10 bg-white/5 p-1.5 text-slate-300 hover:bg-white/10"
+      >
+        {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+      </button>
+      <div className="flex max-h-[75vh] overflow-auto text-[13px] leading-6">
+        <div className="select-none border-r border-white/5 px-3 py-4 text-right font-mono text-slate-500/70">
+          {lines.map((_, i) => (
+            <div key={i}>{i + 1}</div>
+          ))}
         </div>
-
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {!loading && content && (
-            <>
-              <span className="hidden md:inline text-[11px] text-slate-500 font-mono mr-2 tabular-nums">
-                {lines.length} {lines.length === 1 ? 'line' : 'lines'} · {formatFileSize(content.length)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setWrap((value) => !value)}
-                aria-pressed={wrap}
-                title={wrap ? 'Disable soft wrap' : 'Enable soft wrap'}
-                className={`btn-icon hover:bg-line ${wrap ? 'text-blue-400 bg-line' : 'text-slate-400 hover:text-white'}`}
-              >
-                <WrapText className="w-4 h-4" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => copy(content)}
-                title="Copy file contents"
-                className="btn-icon text-slate-400 hover:text-white hover:bg-line"
-              >
-                {copied
-                  ? <Check className="w-4 h-4 text-emerald-400" aria-hidden="true" />
-                  : <Copy className="w-4 h-4" aria-hidden="true" />}
-                <span className="sr-only">{copied ? 'Copied' : 'Copy file contents'}</span>
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close file preview"
-            className="btn-icon text-slate-400 hover:text-white hover:bg-line"
-          >
-            <X className="w-4 h-4" aria-hidden="true" />
-          </button>
-        </div>
+        <pre className="flex-1 px-4 py-4">
+          <code className="hljs font-mono" dangerouslySetInnerHTML={{ __html: html }} />
+        </pre>
       </div>
+    </div>
+  )
+}
 
-      {loading ? (
-        <div className="p-10 flex justify-center">
-          <Spinner label="Loading file…" />
-        </div>
-      ) : (
-        <div className="bg-canvas max-h-[32rem] overflow-auto overscroll-none-y">
-          <table className="w-full border-collapse font-mono text-xs leading-relaxed">
-            <tbody>
-              {shown.map((line, index) => (
-                <tr key={index} className="hover:bg-elevated/40">
-                  {/* The gutter is aria-hidden and unselectable so copying a
-                      region of the file doesn't drag line numbers along. */}
-                  <td
-                    aria-hidden="true"
-                    className="select-none text-right align-top text-slate-600 w-px pl-4 pr-4 tabular-nums sticky left-0 bg-canvas"
-                  >
-                    {index + 1}
-                  </td>
-                  <td className={`align-top pr-4 text-slate-200 ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`}>
-                    {line || ' '}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+export default function FileViewer({ repoName, branch, path }) {
+  const [file, setFile] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-          {truncated && (
-            <p className="px-4 py-3 border-t border-line text-xs text-amber-400 bg-amber-500/5">
-              Preview truncated at {MAX_RENDERED_LINES.toLocaleString()} lines
-              ({(lines.length - MAX_RENDERED_LINES).toLocaleString()} more). Use the copy button for the full contents.
-            </p>
-          )}
+  useEffect(() => {
+    if (!repoName || !branch || !path) return
+    let active = true
+    setLoading(true)
+    getBlob(repoName, branch, path).then((data) => {
+      if (active) {
+        setFile(data)
+        setLoading(false)
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [repoName, branch, path])
 
-          {lines.length === 0 && (
-            <p className="px-4 py-10 text-center text-xs text-slate-500">This file is empty.</p>
-          )}
-        </div>
-      )}
-    </section>
-  );
+  if (loading || !file) return <PageSpinner label="Loading file..." />
+
+  if (isMarkdown(path)) {
+    return (
+      <ReadmeViewer
+        content={file.content}
+        fileName={file.name}
+        meta={file.last_commit ? { sha: shortHash(file.last_commit.sha), message: file.last_commit.message } : null}
+      />
+    )
+  }
+
+  return (
+    <div className="animate-fade-in">
+      <div className="mb-3 flex flex-wrap items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+        <span className="inline-flex items-center gap-1.5 font-medium text-slate-800 dark:text-slate-100">
+          <FileText size={15} />
+          {file.name}
+        </span>
+        {file.last_commit && (
+          <span className="inline-flex items-center gap-1.5" title={file.last_commit.message}>
+            <GitCommitHorizontal size={13} />
+            <span className="font-mono">{shortHash(file.last_commit.sha)}</span>
+            <span className="max-w-xs truncate">{file.last_commit.message}</span>
+            <span>&middot; {timeAgo(file.last_commit.date)}</span>
+          </span>
+        )}
+      </div>
+      <PlainCodeViewer content={file.content} ext={fileExtension(path)} />
+    </div>
+  )
 }

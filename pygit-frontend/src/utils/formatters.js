@@ -1,89 +1,79 @@
-/** Normalise the backend's timestamps (Unix seconds) or ISO strings to a Date. */
-function toDate(dateInput) {
-  if (dateInput === null || dateInput === undefined || dateInput === '') return null;
-  const date =
-    typeof dateInput === 'number'
-      ? new Date(dateInput * (dateInput < 10000000000 ? 1000 : 1))
-      : new Date(dateInput);
-  return Number.isNaN(date.getTime()) ? null : date;
+// Display formatting helpers shared across pages/components.
+
+export function timeAgo(timestamp) {
+  if (!timestamp) return 'unknown'
+  const seconds = Math.floor(Date.now() / 1000 - Number(timestamp))
+  if (seconds < 5) return 'just now'
+  const units = [
+    ['year', 31536000],
+    ['month', 2592000],
+    ['week', 604800],
+    ['day', 86400],
+    ['hour', 3600],
+    ['minute', 60],
+  ]
+  for (const [label, secs] of units) {
+    const value = Math.floor(seconds / secs)
+    if (value >= 1) return `${value} ${label}${value > 1 ? 's' : ''} ago`
+  }
+  return `${seconds} second${seconds === 1 ? '' : 's'} ago`
 }
 
-/**
- * Format timestamp into relative time string (e.g. "2 hours ago")
- */
-export function formatRelativeTime(dateInput) {
-  const date = toDate(dateInput);
-  if (!date) return 'N/A';
-
-  const now = new Date();
-  const diffInSeconds = Math.floor((now - date) / 1000);
-
-  // Clock skew between the browser and the backend can put a fresh commit a
-  // few seconds in the future; "in 3 seconds" reads as a bug, so clamp it.
-  if (diffInSeconds < 60) return 'just now';
-  if (diffInSeconds < 3600) {
-    const mins = Math.floor(diffInSeconds / 60);
-    return `${mins} minute${mins === 1 ? '' : 's'} ago`;
-  }
-  if (diffInSeconds < 86400) {
-    const hours = Math.floor(diffInSeconds / 3600);
-    return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-  }
-  if (diffInSeconds < 2592000) {
-    const days = Math.floor(diffInSeconds / 86400);
-    return `${days} day${days === 1 ? '' : 's'} ago`;
-  }
-
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
-  });
-}
-
-/**
- * Full date + time, for the `title` tooltip next to a relative time so the
- * exact moment is still one hover away.
- */
-export function formatAbsoluteTime(dateInput) {
-  const date = toDate(dateInput);
-  if (!date) return '';
-  return date.toLocaleString(undefined, {
-    weekday: 'short',
+export function formatDate(timestamp) {
+  if (!timestamp) return ''
+  return new Date(Number(timestamp) * 1000).toLocaleString(undefined, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  });
+  })
 }
 
-/**
- * Truncate commit SHA hash to short form (first 7 chars)
- */
-export function shortSha(hash) {
-  if (!hash) return '';
-  return hash.substring(0, 7);
+export function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / 1024 ** i
+  return `${i === 0 ? value : value.toFixed(1)} ${units[i]}`
 }
 
-/**
- * Split "Name <email@example.com>" into its parts so the UI can show the name
- * prominently and keep the address for a tooltip.
- */
-export function parseAuthor(author) {
-  if (!author) return { name: 'Unknown', email: '' };
-  const match = /^\s*(.*?)\s*<([^>]*)>\s*$/.exec(author);
-  if (!match) return { name: author.trim(), email: '' };
-  return { name: match[1] || match[2], email: match[2] };
+export function shortHash(hash, length = 7) {
+  return hash ? hash.slice(0, length) : ''
 }
 
-/**
- * Format bytes to readable size (e.g. "1.2 KB")
- */
-export function formatFileSize(bytes) {
-  if (!bytes) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+export function initials(name) {
+  if (!name) return '?'
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('')
+}
+
+// Deterministic pastel-ish color from a string, used for avatars/branch chips.
+export function colorFromString(str) {
+  let hash = 0
+  for (let i = 0; i < (str || '').length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i)
+    hash |= 0
+  }
+  const hue = Math.abs(hash) % 360
+  return `hsl(${hue}, 65%, 55%)`
+}
+
+export function fileExtension(path) {
+  if (!path) return ''
+  const name = path.split('/').pop()
+  const idx = name.lastIndexOf('.')
+  return idx > 0 ? name.slice(idx + 1).toLowerCase() : ''
+}
+
+export function isMarkdown(path) {
+  return fileExtension(path) === 'md' || fileExtension(path) === 'markdown'
+}
+
+export function pluralize(count, word) {
+  return `${count} ${word}${count === 1 ? '' : 's'}`
 }

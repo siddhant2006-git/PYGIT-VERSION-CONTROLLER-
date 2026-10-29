@@ -1,33 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getCommits } from '../services/api';
+import { useCallback, useEffect, useState } from 'react'
+import { apiStatus, getCommits } from '../services/api'
 
-export function useCommits(repoName, branch = 'main') {
-  const [commits, setCommits] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+export function useCommits(name, branch) {
+  const [commits, setCommits] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [offline, setOffline] = useState(false)
 
-  const fetchCommits = useCallback(async () => {
-    if (!repoName) return;
-    setLoading(true);
-    setError(null);
+  const refresh = useCallback(async () => {
+    if (!name) return
+    setLoading(true)
+    setError(null)
     try {
-      const data = await getCommits(repoName, branch);
-      setCommits(data);
+      const data = await getCommits(name, branch)
+      setCommits(data)
+      setOffline(apiStatus.offline)
     } catch (err) {
-      setError(err.message || 'Failed to load commits');
+      setError(err)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [repoName, branch]);
+  }, [name, branch])
 
   useEffect(() => {
-    fetchCommits();
-  }, [fetchCommits]);
+    refresh()
+  }, [refresh])
 
-  return {
-    commits,
-    loading,
-    error,
-    refetch: fetchCommits
-  };
+  return { commits, loading, error, offline, refresh }
 }

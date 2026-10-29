@@ -1,29 +1,25 @@
-import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
-import Navbar from '../components/Navbar';
+import { Outlet } from 'react-router-dom'
+import Navbar from '../components/Navbar'
+import { useTheme } from '../hooks/useTheme'
+import { useEffect, useState } from 'react'
+import { apiStatus } from '../services/api'
 
 export default function MainLayout() {
-  const [searchQuery, setSearchQuery] = useState('');
+  const { theme, toggleTheme } = useTheme()
+  const [offline, setOffline] = useState(apiStatus.offline)
+
+  // Cheap poll so the offline banner reflects the latest request without prop-drilling.
+  useEffect(() => {
+    const id = setInterval(() => setOffline(apiStatus.offline), 1500)
+    return () => clearInterval(id)
+  }, [])
 
   return (
-    <div className="min-h-screen bg-canvas text-slate-300 flex flex-col font-sans">
-      <Navbar searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
-
-      {/* Target for the navbar's skip link, and the landmark screen readers
-          jump to. tabIndex lets the skip link actually move focus here. */}
-      <main id="main" tabIndex={-1} className="flex-1 pb-16 focus:outline-none">
-        <Outlet context={{ searchQuery, setSearchQuery }} />
+    <div className="min-h-screen bg-canvas-light dark:bg-canvas-dark">
+      <Navbar theme={theme} onToggleTheme={toggleTheme} offline={offline} />
+      <main className="mx-auto max-w-7xl px-4 sm:px-6 py-6">
+        <Outlet />
       </main>
-
-      <footer className="bg-surface border-t border-line py-6 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
-          <p className="flex flex-wrap items-center justify-center gap-x-2">
-            <span className="font-bold text-slate-300">PyGit</span>
-            <span>— Educational Version Control System in Python</span>
-          </p>
-          <p>Built with React, Vite &amp; Tailwind CSS</p>
-        </div>
-      </footer>
     </div>
-  );
+  )
 }

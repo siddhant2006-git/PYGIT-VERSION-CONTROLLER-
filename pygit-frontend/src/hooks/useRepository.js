@@ -1,67 +1,34 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getRepository, getRepositoryFiles, getReadme, getBranches } from '../services/api';
+import { useCallback, useEffect, useState } from 'react'
+import { apiStatus, getBranches, getRepository } from '../services/api'
 
-export function useRepository(repoName) {
-  const [repo, setRepo] = useState(null);
-  const [branches, setBranches] = useState([]);
-  const [currentBranch, setCurrentBranch] = useState('main');
-  const [files, setFiles] = useState([]);
-  const [readme, setReadme] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+export function useRepository(name) {
+  const [repository, setRepository] = useState(null)
+  const [branches, setBranches] = useState([])
+  const [branch, setBranch] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [offline, setOffline] = useState(false)
 
-  const fetchRepoData = useCallback(async () => {
-    if (!repoName) return;
-    setLoading(true);
-    setError(null);
+  const refresh = useCallback(async () => {
+    if (!name) return
+    setLoading(true)
+    setError(null)
     try {
-      const [repoData, branchList] = await Promise.all([
-        getRepository(repoName),
-        getBranches(repoName)
-      ]);
-      setRepo(repoData);
-      setBranches(branchList);
-      const activeBranch = repoData.current_branch || repoData.default_branch || 'main';
-      setCurrentBranch(activeBranch);
-
-      const [filesList, readmeData] = await Promise.all([
-        getRepositoryFiles(repoName, activeBranch),
-        getReadme(repoName, activeBranch).catch(() => null)
-      ]);
-      setFiles(filesList);
-      setReadme(readmeData);
+      const [repo, branchList] = await Promise.all([getRepository(name), getBranches(name)])
+      setRepository(repo)
+      setBranches(branchList)
+      setBranch((prev) => prev || repo.current_branch || repo.default_branch)
+      setOffline(apiStatus.offline)
     } catch (err) {
-      setError(err.message || `Failed to load repository ${repoName}`);
+      setError(err)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [repoName]);
+  }, [name])
 
   useEffect(() => {
-    fetchRepoData();
-  }, [fetchRepoData]);
+    refresh()
+  }, [refresh])
 
-  const switchBranch = async (branchName) => {
-    setCurrentBranch(branchName);
-    try {
-      const filesList = await getRepositoryFiles(repoName, branchName);
-      setFiles(filesList);
-      const readmeData = await getReadme(repoName, branchName).catch(() => null);
-      setReadme(readmeData);
-    } catch (err) {
-      console.error('Failed to fetch files for branch:', branchName, err);
-    }
-  };
-
-  return {
-    repo,
-    branches,
-    currentBranch,
-    files,
-    readme,
-    loading,
-    error,
-    switchBranch,
-    refetch: fetchRepoData
-  };
+  return { repository, branches, branch, setBranch, loading, error, offline, refresh }
 }
