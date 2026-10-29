@@ -1,5 +1,4 @@
 import json
-import os
 import shutil
 import sys
 import time
@@ -15,13 +14,23 @@ for d in [str(BASE_DIR), str(ROOT_DIR)]:
         sys.path.insert(0, d)
 
 try:
-    from pygitbackend.repository import Repository, validate_path, validate_repo_name
+    from pygitbackend.repository import (
+        Repository,
+        validate_branch_name,
+        validate_path,
+        validate_repo_name,
+    )
     from pygitbackend.exceptions import PyGitError, FileError, BranchError
 except ModuleNotFoundError:
-    from repository import Repository, validate_path, validate_repo_name
+    from repository import (
+        Repository,
+        validate_branch_name,
+        validate_path,
+        validate_repo_name,
+    )
     from exceptions import PyGitError, FileError, BranchError
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -49,7 +58,7 @@ REPOS_DIR.mkdir(exist_ok=True)
 ROOT_ALIASES = {"pygit", "pygit-core", "gitclone", "current", BASE_DIR.name.lower()}
 
 
-def get_repo(repo_name: str, auto_create: bool = True, allow_root: bool = True) -> Repository:
+def get_repo(repo_name: str, allow_root: bool = True) -> Repository:
     """Helper to resolve and validate a Repository instance."""
     if repo_name.lower() in ROOT_ALIASES:
         if not allow_root:
@@ -67,19 +76,7 @@ def get_repo(repo_name: str, auto_create: bool = True, allow_root: bool = True) 
 
     repo = Repository(str(repo_path))
     if not repo.git_dir.exists():
-        if auto_create:
-            repo_path.mkdir(parents=True, exist_ok=True)
-            repo.init()
-            readme_file = repo_path / "README.md"
-            if not readme_file.exists():
-                readme_file.write_text(f"# {repo_name}\n\nPyGit version controlled repository.\n", encoding="utf-8")
-            try:
-                repo.add_path("README.md")
-                repo.commit("Initial commit with README.md")
-            except Exception:
-                pass
-        else:
-            raise HTTPException(status_code=404, detail=f"Repository '{repo_name}' not found")
+        raise HTTPException(status_code=404, detail=f"Repository '{repo_name}' not found")
     return repo
 
 
@@ -134,11 +131,8 @@ def calculate_repo_stats(repo: Repository, name: str, description: str = "", vis
     head_commit = repo.get_head_commit_hash()
     commit_count = 0
     if head_commit:
-        try:
-            commits = repo._collect_ancestor_commits(head_commit)
-            commit_count = len(commits)
-        except Exception:
-            commit_count = 0
+        commits = repo._collect_ancestor_commits(head_commit)
+        commit_count = len(commits)
 
     files = []
     has_readme = (repo.path / "README.md").exists()
@@ -181,10 +175,8 @@ def list_repositories():
     repos_list.append(calculate_repo_stats(root_repo, "pygit", "PyGit core Python implementation"))
     
     for d in REPOS_DIR.iterdir():
-        if d.is_dir():
+        if d.is_dir() and (d / ".pygit").is_dir():
             r = Repository(str(d))
-            if not r.git_dir.exists():
-                r.init()
             desc = ""
             desc_file = d / ".description"
             if desc_file.exists():
@@ -201,11 +193,13 @@ def create_repository(req: CreateRepoRequest):
         raise HTTPException(status_code=400, detail=f"'{req.name}' is a reserved repository name")
     try:
         safe_name = validate_repo_name(req.name)
+        initial_branch = req.initial_branch or "main"
+        validate_branch_name(initial_branch)
     except PyGitError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     target_dir = REPOS_DIR / safe_name
-    if target_dir.exists() and (target_dir / ".pygit").exists():
+    if target_dir.exists():
         raise HTTPException(status_code=400, detail=f"Repository '{req.name}' already exists")
 
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -214,6 +208,8 @@ def create_repository(req: CreateRepoRequest):
 
     repo = Repository(str(target_dir))
     repo.init()
+    if initial_branch != "main":
+        repo.rename_branch(initial_branch)
 
     if req.initialize_readme:
         readme_path = target_dir / "README.md"
@@ -237,7 +233,7 @@ def get_repository_info(repo_name: str):
 @app.delete("/api/repositories/{repo_name}")
 def delete_repository(repo_name: str):
     """Permanently delete a repository and all of its data."""
-    repo = get_repo(repo_name, auto_create=False, allow_root=False)
+    repo = get_repo(repo_name, allow_root=False)
     try:
         shutil.rmtree(repo.path)
     except OSError as e:
@@ -315,6 +311,8 @@ def get_commits(repo_name: str, branch: Optional[str] = None):
     """Retrieve commit history log for the given branch (or the current branch)."""
     repo = get_repo(repo_name)
     target_branch = branch or repo.get_current_branch()
+    if target_branch not in repo.list_branches():
+        raise HTTPException(status_code=404, detail=f"Branch '{target_branch}' not found")
     head_hash = repo._read_ref(target_branch)
     if not head_hash:
         return []
@@ -322,27 +320,24 @@ def get_commits(repo_name: str, branch: Optional[str] = None):
     commits_data = []
     ancestor_hashes = repo._collect_ancestor_commits(head_hash)
     for chash in ancestor_hashes:
-        try:
-            parsed = repo._parse_commit(chash)
-            author_str = str(parsed.get("author", "PyGit User"))
-            date_timestamp = int(time.time())
-            parts = author_str.rsplit(" ", 2)
-            if len(parts) == 3 and parts[1].isdigit():
-                date_timestamp = int(parts[1])
-                author_name = parts[0]
-            else:
-                author_name = author_str
+        parsed = repo._parse_commit(chash)
+        author_str = str(parsed.get("author", "PyGit User"))
+        date_timestamp = int(time.time())
+        parts = author_str.rsplit(" ", 2)
+        if len(parts) == 3 and parts[1].isdigit():
+            date_timestamp = int(parts[1])
+            author_name = parts[0]
+        else:
+            author_name = author_str
 
-            commits_data.append({
-                "hash": chash,
-                "message": parsed.get("message", "").strip(),
-                "author": author_name,
-                "date": date_timestamp,
-                "parents": parsed.get("parents", []),
-                "files_changed": []
-            })
-        except Exception:
-            continue
+        commits_data.append({
+            "hash": chash,
+            "message": parsed.get("message", "").strip(),
+            "author": author_name,
+            "date": date_timestamp,
+            "parents": parsed.get("parents", []),
+            "files_changed": []
+        })
     return commits_data
 
 
@@ -406,6 +401,28 @@ def rename_branch_endpoint(repo_name: str, req: RenameBranchRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/repositories/{repo_name}/merge")
+def merge_branch_endpoint(repo_name: str, req: BranchRequest):
+    """Fast-forward merge a branch into the current branch."""
+    repo = get_repo(repo_name, allow_root=False)
+    try:
+        merged = repo.merge(req.name)
+        return {"branch": merged, "message": f"Merged branch '{merged}'"}
+    except PyGitError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/repositories/{repo_name}/rebase")
+def rebase_branch_endpoint(repo_name: str, req: BranchRequest):
+    """Rebase the current branch onto the requested branch."""
+    repo = get_repo(repo_name, allow_root=False)
+    try:
+        rebased = repo.rebase(req.name)
+        return {"current_branch": rebased, "message": f"Rebased onto '{req.name}'"}
+    except PyGitError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/repositories/{repo_name}/status")
 def get_status(repo_name: str):
     """Get repository status (staged and untracked files)."""
@@ -415,7 +432,11 @@ def get_status(repo_name: str):
     untracked = []
 
     for path in repo.path.rglob("*"):
-        if repo.git_dir in path.parents or path.is_dir() or path.name.startswith("."):
+        if (
+            repo.git_dir in path.parents
+            or path.is_dir()
+            or path.name == ".description"
+        ):
             continue
         rel_path = path.relative_to(repo.path).as_posix()
         if rel_path not in index:
@@ -445,11 +466,12 @@ def commit_endpoint(repo_name: str, req: CommitRequest):
     """Create a commit object (pygit commit)."""
     repo = get_repo(repo_name, allow_root=False)
     try:
-        commit_hash = repo.commit(req.message, req.author or "PyGit User <user@pygit.com>")
+        author = req.author or "PyGit User <user@pygit.com>"
+        commit_hash = repo.commit(req.message, author)
         return {
             "hash": commit_hash,
             "message": req.message,
-            "author": req.author,
+            "author": author,
             "date": int(time.time())
         }
     except PyGitError as e:
@@ -465,11 +487,14 @@ def get_remotes(repo_name: str):
         return []
     try:
         data = json.loads(config_file.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return [{"name": k, "url": v} for k, v in data.items()]
-    except Exception:
-        pass
-    return []
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail="Remote configuration is invalid") from e
+    if not isinstance(data, dict) or not all(
+        isinstance(name, str) and isinstance(url, str)
+        for name, url in data.items()
+    ):
+        raise HTTPException(status_code=500, detail="Remote configuration is invalid")
+    return [{"name": name, "url": url} for name, url in data.items()]
 
 
 @app.post("/api/repositories/{repo_name}/remotes")
